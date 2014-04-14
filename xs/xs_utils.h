@@ -123,7 +123,7 @@ static int xs_strcmp(const char *s1, const char *s2) {
     return xs_strncmp(s1,s2,INT_MAX);
 }
 
-int xs_b64_encode(char *dst, const unsigned char *src, int count) {
+static int xs_b64_encode(char *dst, const unsigned char *src, int count) {
     const char *b64_tab = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     int i=0, j=0;
     int a, b, c;

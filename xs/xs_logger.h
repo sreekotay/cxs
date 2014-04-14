@@ -21,26 +21,26 @@ enum {
 };
 
 
-char* xs_timestr        (char *buf, size_t buflen, time_t *t); //t is allowed to be NULL -- in which case buf and buflen may be zero also
-char* xs_timestr_now    (void);
+const char* xs_timestr        (char *buf, size_t buflen, time_t *t); //t is allowed to be NULL -- in which case buf and buflen may be zero also
+const char* xs_timestr_now    (void);
 
 int xs_logger_init      (void);
 int xs_logger_level     (int newfilelevel,int newecholevel);
-int xs_logger           (int level, char* fmt, ...);
-int xs_logger_va        (int level, char* fmt, va_list ap);
-int xs_access           (char* fmt, ...);
-int xs_access_va        (char* fmt, ...);
+int xs_logger           (int level, const char* fmt, ...);
+int xs_logger_va        (int level, const char* fmt, va_list ap);
+int xs_access           (const char* fmt, ...);
+int xs_access_va        (const char* fmt, ...);
 int xs_logger_flush     (void);
 int xs_logger_destroy   (void);
 
 
 
-int xs_logger_trace     (char* fmt, ...);
-int xs_logger_debug     (char* fmt, ...);
-int xs_logger_info      (char* fmt, ...);
-int xs_logger_warn      (char* fmt, ...);
-int xs_logger_error     (char* fmt, ...);
-int xs_logger_fatal     (char* fmt, ...);
+int xs_logger_trace     (const char* fmt, ...);
+int xs_logger_debug     (const char* fmt, ...);
+int xs_logger_info      (const char* fmt, ...);
+int xs_logger_warn      (const char* fmt, ...);
+int xs_logger_error     (const char* fmt, ...);
+int xs_logger_fatal     (const char* fmt, ...);
 
 #endif //header
 
@@ -105,7 +105,7 @@ void xs_log_process(xs_queue* qs, xs_logdata* ldatp, xs_log* log) {
 }
 
 void xs_log_flush_threadproc(xs_log* log);
-int xs_log_create(xs_log* log, char* path) {
+int xs_log_create(xs_log* log, const char* path) {
     memset(log, 0, sizeof(xs_log));
 
     xs_strlcpy (log->path, path, sizeof(log->path));
@@ -230,7 +230,7 @@ static const char *gxs_day[]        = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri",
 __thread time_t gxs_curtime         = 0;
 __thread char gx_curtime_str[64]    = "";
 
-char* xs_timestr(char *buf, size_t buflen, time_t *t) { //t is allowed to be NULL -- in which case buf and buflen may be zero also
+const char* xs_timestr(char *buf, size_t buflen, time_t *t) { //t is allowed to be NULL -- in which case buf and buflen may be zero also
     struct tm *tm;
     time_t lt;
     if (t==0) {
@@ -251,7 +251,7 @@ char* xs_timestr(char *buf, size_t buflen, time_t *t) { //t is allowed to be NUL
     return buf;
 }
 
-char* xs_timestr_now(void) {return xs_timestr(0, 0, 0);}
+const char* xs_timestr_now(void) {return xs_timestr(0, 0, 0);}
 
 xs_log gxslog = {0};
 int xs_logger_init () {
@@ -287,7 +287,7 @@ char* xs_logger_levelstr(int level) {
 }
 
 
-int xs_logger_va (int level, char* fmt, va_list ap) {
+int xs_logger_va (int level, const char* fmt, va_list ap) {
     char str[8192];
     int result=0, l=0, sl=sizeof(str);
     if (gxslog.path[0]==0)                                return -1; //not inited
@@ -322,7 +322,7 @@ int xs_logger_va (int level, char* fmt, va_list ap) {
  */   return result;
 }
 
-int xs_logger (int level, char* fmt, ...) {
+int xs_logger (int level, const char* fmt, ...) {
     int result;
     va_list ap;
     va_start(ap, fmt);
@@ -331,7 +331,7 @@ int xs_logger (int level, char* fmt, ...) {
     return result;
 }
 
-#define xs_logger_f(name,level) int xs_logger_##name (char* fmt, ...) {int r;va_list ap; va_start(ap, fmt); r=xs_logger_va(level, fmt, ap);va_end(ap);return r;}
+#define xs_logger_f(name,level) int xs_logger_##name (const char* fmt, ...) {int r;va_list ap; va_start(ap, fmt); r=xs_logger_va(level, fmt, ap);va_end(ap);return r;}
 
 xs_logger_f(trace, exs_Log_Trace);
 xs_logger_f(info,  exs_Log_Info);
