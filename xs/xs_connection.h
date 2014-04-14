@@ -1004,8 +1004,10 @@ int xs_conn_followredirect (xs_conn** reconn, xs_conn* conn, const char* method)
 
     if ((uri=xs_uri_create(h, 0))==0 || //fail if no valid uri, or its not an understood uri
         (uri->protocol && xs_strcmp_case(uri->protocol, "http://") && xs_strcmp_case(uri->protocol, "https://")
-                       && xs_strcmp_case(uri->protocol, "ws://")   && xs_strcmp_case(uri->protocol, "wss://")))
-        conn->errnum = exs_Error_BadRedirect; return -50;
+                       && xs_strcmp_case(uri->protocol, "ws://")   && xs_strcmp_case(uri->protocol, "wss://"))) {
+        conn->errnum = exs_Error_BadRedirect; 
+        return -50;
+    }
 
     //relative path
     if (0) // not sure this is a good idea... new connection seems warranted $$$SREE

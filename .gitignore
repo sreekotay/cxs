@@ -1,0 +1,10 @@
+*.exe
+*.pdb
+*.*sdf
+*.suo
+**Debug/
+**Release/
+*.ilk
+*.user
+*.filters
+
