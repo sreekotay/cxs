@@ -78,7 +78,7 @@ static int xs_tohex(int v, int upper) {
 
 
 static int xs_strncmp_case(const char *s1, const char *s2, size_t n) {
-    //const char* si=s1;
+    //const char* si=s1; //needed below IF we return the count offset
     int v = 0;
     if (s1==s2) return 0;
     if (s2==0)  return 1;
@@ -107,7 +107,7 @@ static const char *xs_strstr_case(const char *bstr, const char *sstr) {
 }
 
 static int xs_strncmp(const char *s1, const char *s2, size_t n) {
-    //const char* si=s1;
+    //const char* si=s1; //needed below IF we return the count offset
     int v = 0;
     if (s1==s2) return 0;
     if (s2==0)  return 1;
