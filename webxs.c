@@ -1227,7 +1227,7 @@ size_t xs_http_writefiledata(xs_conn* conn, const char* path, xs_fileinfo* fdp, 
                 if (blocking==0) return tot; 
                 xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
                 xs_conn_cachepurge(conn);
-            } else if (xs_conn_error (conn) || w==0) {xs_printf ("err3 %zd\n", w); break;}//{if (result==0 && tot==0) tot=w; break;}
+            } else if (xs_conn_error (conn) || w==0) {xs_printf ("err3 %zd %d\n", w, xs_conn_error (conn)); break;}//{if (result==0 && tot==0) tot=w; break;}
             tot += w;
         } while (tot<outtot);
 	} else {
@@ -1518,6 +1518,7 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
 	char buf[1024];
 	int n, s, err=0, sock=0, rr;
 	const char* h;
+    xs_logger_info ("entering %d", message);
 	switch (message) {
 		case exs_Conn_New:
 			break;
@@ -1607,6 +1608,7 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
 		xs_async_destroy(xas);
 	}
 
+    xs_logger_info ("exiting %d", message);
 	return err;
 }
 
