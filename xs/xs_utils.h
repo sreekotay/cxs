@@ -24,6 +24,7 @@ static int              xs_tohex            (int v, int upper);
 static int              xs_strappend        (char* d, int n, const char* s);
 static int              xs_strlappend       (char* d, int n, const char* s, int l);
 
+
 /*
 typedef struct xs_conststr xs_conststr;
 

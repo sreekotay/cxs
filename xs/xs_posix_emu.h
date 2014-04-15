@@ -19,6 +19,11 @@
 #endif //O_BINARY
 #endif
 
+
+static char      xs_path_isabsolute  (const char *path);
+static void      xs_path_setabsolute (char *path, int pathsize, const char *rootpath, const char* exepath);
+
+
 // =================================================================================================================
 // basic thread emuation
 // =================================================================================================================
@@ -634,5 +639,44 @@ int munmap(void* const start, const size_t len) {
 #define PATH_MAX 2048
 #endif
 */
+
+
+// =================================================================================================================
+// file functions
+// =================================================================================================================
+#ifdef WIN32
+#define DIRSEP '\\'
+#define xs_path_canonicalize(rel, abs, abs_size) _fullpath((abs), (rel), (abs_size))
+#else
+#define DIRSEP '/'
+#define xs_path_canonicalize(rel, abs, abs_size) realpath((rel), (abs))
+#endif
+
+static char xs_path_isabsolute(const char *path) {
+#ifdef _WIN32
+	return path != NULL && ((path[0] == '\\' && path[1] == '\\') ||      // is a network path ?
+           (xs_isalpha(path[0]) && path[1] == ':' && path[2] == '\\'));  // or a drive path?
+#else
+	return path != NULL && path[0] == '/';                               // unix abs path?
+#endif
+}
+
+#include "xs_printf.h"
+
+static void xs_path_setabsolute(char *path, int pathsize, const char *rootpath, const char* exepath) {
+	char abs[PATH_MAX];
+	const char *p;
+	if (!xs_path_isabsolute(rootpath)) {
+		if ((p=strrchr(exepath, DIRSEP))==0) {
+			if (getcwd(path, pathsize)==0) path[0]=0; //failure to get working dir?
+		} else xs_sprintf(path, pathsize, "%.*s", (int) (p - exepath), exepath);
+		
+		xs_strlcat(path, "/", pathsize - 1);
+		xs_strlcat(path, rootpath, pathsize - 1);
+		if (xs_path_canonicalize(path, abs, sizeof(abs)))
+			xs_strlcpy (path, abs, pathsize);
+	}
+}
+
 
 #endif // for entire file

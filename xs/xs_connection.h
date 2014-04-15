@@ -1411,12 +1411,13 @@ struct xs_async_connect*  xs_async_create(int hintsize) {
     return xas;
 }
 
-int xs_async_active(struct xs_async_connect* xas)                       {return xas->stop==0;}
+int xs_async_active(struct xs_async_connect* xas)                       {return xas&&xas->stop==0;}
 void xs_async_setuserdata(struct xs_async_connect* xas, void* usd)      {if (xas) xas->userdata=usd;}
 void* xs_async_getuserdata(struct xs_async_connect* xas)                {return xas ? xas->userdata : 0;}
 
 struct xs_async_connect* xs_async_destroy(struct xs_async_connect* xas) {
-    if (xas) xas->stop = 1;
+    if (xas==0) return 0;
+    xas->stop = 1;
     xs_pollfd_stop(xas->xp);
     xs_pollfd_dec(xas->xp);
     free(xas);
