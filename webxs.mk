@@ -8,18 +8,18 @@ BIN   := webxs
 
 # Toolchain arguments.
 //CCFLAGS   := -Os
-CCFLAGS   := -g
+CCFLAGS   := -g -ggdb
 CCPLAGS   := $(CCFLAGS)
 
 ifeq ($(OS),Windows_NT)
 	LDFLAGS = -lpthread -lws2_32 -lcomdlg32 -static-libgcc
 else 
-	LDFLAGS   := -lpthread -ldl -lrt -flto -g
+	LDFLAGS   := -lpthread -ldl -lrt -flto -g -ggdb
 	//LDFLAGS   := -lpthread -ldl -lrt
 endif
 
-DEADCODESTRIP := -fdata-sections -ffunction-sections -Wl,--gc-sections -Wl,-s
-//DEADCODESTRIP := -Wl,-s
+//DEADCODESTRIP := -fdata-sections -ffunction-sections -Wl,--gc-sections -Wl,-s
+DEADCODESTRIP := 
 
 
 # Project sources.
