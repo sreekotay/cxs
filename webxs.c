@@ -907,7 +907,7 @@ static void log_stack_trace() {
     char **strings = backtrace_symbols(arr, frames);
     if (strings) {
         xs_logger_fatal("log_stack_trace: begin [%zd frames]", frames);
-        for (i=0; i<frames; i++) xs_logger_fatal("  %s", strings[i]);
+        for (i=0; i<frames; i++) xs_logger_fatal("  log_stack %s", strings[i]);
         xs_logger_fatal("log_stack_trace: end");
         free(strings);
     }
@@ -1052,7 +1052,7 @@ int main(int argc, char *argv[]) {
             */
 			xs_server_listen (ctx, conn);
 			xs_server_listen (ctx, conn6);
-			xs_server_listen (ctx, conn_ssl);
+            xs_server_listen (ctx, conn_ssl);
 			while (xs_server_active(ctx)) {sleep(1);}
 			//xs_async_destroy(xas);
 			xs_logger_fatal ("---- done ----");

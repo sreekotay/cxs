@@ -76,6 +76,7 @@ xs_conn*            xs_conn_inc             (xs_conn*);
 xs_conn*            xs_conn_dec             (xs_conn*); 
 xs_atomic           xs_conn_seq             (xs_conn*); 
 xs_atomic           xs_conn_seqinc          (xs_conn*); 
+xs_atomic           xs_conn_rcount          (xs_conn*); 
 
 //write functions
 size_t              xs_conn_header_done     (xs_conn*, int hasBody); //very important
@@ -198,7 +199,7 @@ void*               xs_async_getuserdata    (xs_async_connect*);
 //  conn implementation
 // =================================================================================================================
 struct xs_conn {
-    xs_atomic           refcount, seq;     
+    xs_atomic           refcount, seq, rcount;     
     unsigned int        is_ssl:8, corked:8, is_wblocked:2, upgrade:4, proto:2;
     int                 sock;
     int                 errnum;
@@ -210,7 +211,7 @@ struct xs_conn {
     char*               host;
     char*               scratch;
     char*               buf;
-    char                sslproto[8];
+    char                sslproto[10];
     xs_httpreq          *req, *lastreq, *freereq;
     char                method[10];//max method;
 #ifndef NO_SSL
@@ -299,6 +300,10 @@ xs_conn*    xs_conn_dec(xs_conn *conn) {
 xs_atomic   xs_conn_seq (xs_conn* conn) {
     if (conn==0) return 0;
     return conn->seq;
+}
+xs_atomic   xs_conn_rcount (xs_conn* conn) {
+    if (conn==0) return 0;
+    return conn->rcount;
 }
 xs_atomic   xs_conn_seqinc (xs_conn* conn) {
     if (conn==0) return 0;
@@ -936,6 +941,7 @@ int xs_conn_headerready(xs_conn *conn) {
     xs_conn_bufresize(conn);
     rlen = (conn->upgrade==0) ? xs_http_validrequest    (conn->buf, conn->datalen) :
                                 xs_websocket_framevalid (conn->buf, conn->datalen, 0, 0);
+    if (rlen<0)                 conn->errnum = exs_Error_InvalidRequest;
     if (rlen==0 &&
         (n=xs_conn_read (conn, conn->buf + conn->datalen, conn->bufsize-conn->datalen, 0)) > 0) {
         conn->datalen += n;
@@ -1033,6 +1039,7 @@ int xs_conn_followredirect (xs_conn** reconn, xs_conn* conn, const char* method)
 // ==============================================
 size_t xs_conn_read (xs_conn* conn, void* buf, size_t len, int* reread) {
     int n;
+    xs_atomic_inc (conn->rcount);
     if (xs_arr_count(conn->wcache) && conn->is_wblocked==0) xs_conn_cachepurge(conn);
     if (conn->ssl)  n = xs_SSL_read (conn->ssl, buf, (int)len);
     else            n = recv (conn->sock, (char*)buf, (int)len, 0);
@@ -1141,7 +1148,7 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
     } else if (reread) *reread=1;
     
     //done
-    if (req && *(int*)req->datamask!=0) //mask if required
+    if (*(int*)req->datamask!=0) //mask if required
         for (n=0; n<nread; n++) ((char*)buf)[n]^=req->datamask[n&3];
     return nread;
 }
@@ -1435,7 +1442,7 @@ struct xs_async_connect*  xs_async_read(struct xs_async_connect* xas, xs_conn* c
 }
 
 struct xs_async_connect*  xs_async_listen(struct xs_async_connect* xas, xs_conn* conn, xs_async_callback* proc) {
-    if (conn==0) return 0;
+    if (conn==0) return xas;
     if (xas==0) xas = xs_async_create(0);
     if (xas==0) return 0;
     conn->cb = proc;

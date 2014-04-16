@@ -23,6 +23,7 @@ static int              xs_fromhex          (const char c);
 static int              xs_tohex            (int v, int upper);
 static int              xs_strappend        (char* d, int n, const char* s);
 static int              xs_strlappend       (char* d, int n, const char* s, int l);
+static int              xs_b64_encode       (char *dst, const unsigned char *src, int count);
 
 
 /*

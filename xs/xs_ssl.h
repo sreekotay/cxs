@@ -235,14 +235,16 @@ int     xs_SSL_read  (SSL *ssl, void *buff, int len)            {return SSL_read
 int     xs_SSL_write (SSL *ssl, const void *buff, int len)      {return SSL_write(ssl,buff,len);}
 
 char xs_SSL_protocol(SSL* ssl, char* data, int maxlen) {
+    /*
     const unsigned char*s; unsigned sl;
     if (data) *data=0; else return 0;
     if (SSL_get0_next_proto_negotiated==0) return 0;
     SSL_get0_next_proto_negotiated (ssl, &s, &sl);
-    if (*s==0 || sl==0) return 0;
-    if (sl>(unsigned)maxlen-1) sl=maxlen=-1;
+    if (s==0 || *s==0 || sl==0) return 0;
+    if (sl>(unsigned)maxlen-1) sl=maxlen-1;
     memcpy(data, s, sl);
     data[sl]=0;
+    */
     return 1;
 }
 char xs_sslize_accept(SSL **ssl, SSL_CTX *s, int sock) {
@@ -314,9 +316,11 @@ SSL_CTX*  xs_SSL_groom_CTX(SSL_CTX *ssl_ctx) {
     SSL_CTX_set_mode    (ssl_ctx, SSL_MODE_ENABLE_PARTIAL_WRITE);
   }
   //SSL_CTX_set_session_id_context(ssl_ctx, "webxsctx", 5);
+  /*
   if (SSL_CTX_set_next_protos_advertised_cb!=0) {
     SSL_CTX_set_next_protos_advertised_cb(ssl_ctx, xs_ssl_set_npn_callback, 0);
   }
+  */
   return ssl_ctx;
 }
 SSL_CTX*        xs_SSL_newCTX_server ()             {return xs_SSL_groom_CTX(SSL_CTX_new(SSLv23_server_method()));}

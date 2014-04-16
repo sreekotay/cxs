@@ -33,8 +33,8 @@ xs_server_ctx*			xs_server_destroy	(xs_server_ctx* ctx);
 #ifndef _xs_SERVER_IMPL_
 #define _xs_SERVER_IMPL_
 
-#include "xs/xs_arr.h"
-#include "xs/xs_queue.h"
+#include "xs_arr.h"
+#include "xs_queue.h"
 
 typedef struct xs_server_ctx {
 	char server_name[PATH_MAX];
@@ -664,15 +664,17 @@ xs_atomic gcc=0, cbcc=0;
 int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
 	xs_server_ctx* ctx = (xs_server_ctx*)xs_async_getuserdata (xas);
 	char buf[1024];
-	int n, s, err=0, sock=0, rr;
+	int n, s, err=0, sock=0, rr, lcount=0;
+	xs_atomic rcount = xs_conn_rcount(conn);
 	const char* h;
-    if (message!=exs_Conn_Idle) xs_logger_info ("entering %d", message);
+    //if (message!=exs_Conn_Idle) xs_logger_info ("entering %d", message);
 	switch (message) {
 		case exs_Conn_New:
 			break;
 		case exs_Conn_Read:
 			cbcc++;
 			while (err==0 && ((n=xs_conn_httpread(conn, buf, sizeof(buf)-1, &rr))>0 || rr)) {
+				lcount++;
 				if ((s=xs_conn_state (conn))==exs_Conn_Complete || n>0) {// || s==exs_Conn_Websocket) {//n>0) {
 					const xs_httpreq* req =xs_conn_getreq(conn);
 					xs_atomic_inc (gcc);
@@ -742,7 +744,9 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
             if (n<0) err=xs_conn_error(conn);
 			if (n!=0 && err==0) break;
             err=err;
+
 			//fallthrough...
+			xs_logger_error ("closing connections from %s", xs_conn_getsockaddrstr (conn));
 
 		case exs_Conn_Error:
 		case exs_Conn_Close:
@@ -756,7 +760,10 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
 		xs_async_destroy(xas);
 	}
 
-    if (message!=exs_Conn_Idle) xs_logger_info ("exiting %d", message);
+	if (message==exs_Conn_Read && rcount==xs_conn_rcount(conn))
+		xs_logger_error ("read error %d : %d", message, rcount);
+
+    //if (message!=exs_Conn_Idle) xs_logger_info ("exiting %d - %d", message, lcount);
 	return err;
 }
 

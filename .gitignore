@@ -11,3 +11,4 @@
 *.o
 *.obj
 *log
+*.dll
