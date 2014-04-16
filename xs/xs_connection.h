@@ -14,12 +14,13 @@ enum {
     exs_Conn_Read,
     exs_Conn_Write,
     exs_Conn_Close,
+    exs_Conn_Idle,
+
+    //connection states
     exs_Conn_Pending,
     exs_Conn_Response,
     exs_Conn_Redirect,
     exs_Conn_Complete,
-    //exs_Conn_Websocket,
-    exs_Conn_Idle,
 
     //attribute enums
     exs_Req_Method              = 1100,

@@ -746,7 +746,7 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
             err=err;
 
 			//fallthrough...
-			xs_logger_error ("closing connections from %s", xs_conn_getsockaddrstr (conn));
+			if (err && err!=exs_Conn_Close) xs_logger_error ("closing connections from %s %d", xs_conn_getsockaddrstr (conn), err);
 
 		case exs_Conn_Error:
 		case exs_Conn_Close:
@@ -760,8 +760,8 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
 		xs_async_destroy(xas);
 	}
 
-	if (message==exs_Conn_Read && rcount==xs_conn_rcount(conn))
-		xs_logger_error ("read error %d : %d", message, rcount);
+	//if (message==exs_Conn_Read && rcount==xs_conn_rcount(conn))
+	//	xs_logger_error ("read error %d : %d", message, rcount);
 
     //if (message!=exs_Conn_Idle) xs_logger_info ("exiting %d - %d", message, lcount);
 	return err;
