@@ -1161,42 +1161,51 @@ char xs_conn_writable (xs_conn* conn){
     int sock = conn ? conn->sock : 0;
     return sock ? ((xs_sock_avail(sock, POLLOUT)&POLLOUT)!=0) : 0;
 }
-
 size_t xs_conn_header_done (xs_conn* conn, int hasBody) {
     return xs_conn_write_ (conn, "\r\n", 2, hasBody ? MSG_MORE : 0);
 }
-
 void xs_conn_body_done (xs_conn* conn) {
     xs_httpreq* req = xs_conn_getreq(conn);
     if (req) req->done = 1;
 }
-
 char xs_conn_writeblocked (xs_conn* conn) {
     return conn ? (xs_arr_count(conn->wcache)!=0) : 0;
 }
-
+int xs_conn_cacheset   (xs_conn* conn) {
+    if(conn==0) return -1; 
+    conn->is_wblocked = 1;
+    return 0;
+}
 int xs_conn_cachepurge (xs_conn* conn) {
     size_t tot=conn?xs_arr_count(conn->wcache):0, wtot;
     if (tot==0) return 0;
 
+    //printf ("--removing %d to %d::%d\n", (int)tot, (int)xs_arr_count(conn->wcache), (int)xs_arr_space(conn->wcache));
     wtot = xs_conn_write_(conn, xs_arr_ptr(void,conn->wcache), tot, MSG_MORE);
-    if (wtot==tot) {xs_arr_reset(conn->wcache); conn->is_wblocked = 0; return 0;}
+    if (wtot==tot) {
+        xs_arr_reset(conn->wcache); 
+        conn->is_wblocked = 0;
+        //printf ("--done cleared %d to %d::%d\n", (int)tot, (int)xs_arr_count(conn->wcache), (int)xs_arr_space(conn->wcache)); 
+        return 0;
+    }
 
     xs_arr_remove(char, conn->wcache, 0, wtot);
+    //printf ("--done removing %d to %d::%d\n", (int)tot, (int)xs_arr_count(conn->wcache), (int)xs_arr_space(conn->wcache)); 
     return -1;
 }
-
 int xs_conn_cachefill (xs_conn* conn, const void* buf, size_t len, int force) {
     const size_t maxcache=1000000;
-    if ((force || xs_arr_count(conn->wcache)) && buf!=xs_arr_ptr(void,conn->wcache)) {
+    if ((force || xs_arr_count(conn->wcache) || conn->is_wblocked) && xs_arr_ptrinrange(char,conn->wcache,buf)==0) {
         if (force || (conn->is_wblocked && len+xs_arr_count(conn->wcache)<=maxcache) || //don't check writable if we're blocked (unless we are at limit) 
             xs_conn_writable(conn)==0 || xs_conn_cachepurge(conn)!=0) {
+            //printf ("--adding %d to %d::%d\n", (int)len, (int)xs_arr_count(conn->wcache), (int)xs_arr_space(conn->wcache));
             if (len+xs_arr_count(conn->wcache)>maxcache || 
                 xs_arr_add(char,conn->wcache,(char*)buf, (int)(len))==0) {
                 conn->errnum=-108;
                 return 0;
             }
-            if (conn->errnum==0) conn->errnum = exs_Error_WriteBusy;
+           //printf ("--done adding %d to %d::%d\n", (int)len, (int)xs_arr_count(conn->wcache), (int)xs_arr_space(conn->wcache));
+           if (conn->errnum==0) conn->errnum = exs_Error_WriteBusy;
             return -1;
         }
     }
@@ -1499,7 +1508,8 @@ xs_uri* xs_uri_create(const char* instr, int forceHost) {
     if (forceHost==2 && uri->port==0) {uri->protocol = 0; buf = (char*)(uri+1); str=instr;} 
 
     //find hostname
-    c=0;  len=(int)(be-buf);
+    c=0;  
+    len=(int)(be-buf);
     p = (str[0]=='[') ? strchr((char*)str, ']') : 0; //IPv6
     if (uri->protocol==0 || xs_strcmp_case(uri->protocol, "file://"))   //not a file path
     if (forceHost || (str[0]=='/' && str[1]=='/') ||                    //per RFC 3986
@@ -1541,7 +1551,8 @@ xs_uri* xs_uri_create(const char* instr, int forceHost) {
     }
 
     //find path
-    c=0; len=(int)(be-buf);
+    c=0; 
+    len=(int)(be-buf);
     while (str[c] && str[c]!='?' && str[c]!='#') c++;
     if (c>0) {
         uri->path = buf; 

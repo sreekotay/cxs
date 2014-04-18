@@ -46,6 +46,7 @@ static void*    xs_arr_add_         (xs_array* ar, const void* data, int n, int 
                                                                                                  if (err) return 0; if (data) memcpy (a, data, n*es); ar->aCount += n; return a;}
 static void*    xs_arr_             (xs_array* ar, int i, int es)                               {return (char*)ar->aData + i*es;}
 static void     xs_arr_replace_     (xs_array* ar, void* data, int c, int s)                    {ar->aData=(void*)data; ar->aCount=c; ar->aSpace=s;}//unsafe
+static int      xs_arr_ptrinrange_  (xs_array* ar, void* p, int es)                             {char*cp=p,*ap=ar->aData; return cp>=ap&&cp<(ap+ar->aSpace*es);}  
 
 #define         xs_arr_create(ar)                                                                xs_arr_create_(&ar)
 #define         xs_arr_destroy(ar)                                                               xs_arr_destroy_(&ar)
@@ -59,6 +60,7 @@ static void     xs_arr_replace_     (xs_array* ar, void* data, int c, int s)    
 #define         xs_arr_reset(ar)                                                                 (ar).aCount=0
 #define         xs_arr_ptr(T, ar)                                                                ((T*)((ar).aData))
 #define         xs_arr(T, ar, i)                                                                 (((T*)((ar).aData))[i])
+#define         xs_arr_ptrinrange(T, ar, p)                                                      xs_arr_ptrinrange_(&ar,(void*)p,sizeof(T))  
 
 
 
@@ -82,12 +84,11 @@ static void* xs_recalloc(void *p, int* c, int r, int se) {
     int oc=*c;
     if (p==0) {
         *c=r;
-        p=calloc((*c)*se, 1);
+        p=calloc(r*se, 1);
     } else if (r>*c) {
-        (*c)*=2;
-        if(r>=(*c)) *c=r;
-        p=realloc(p,(*c)*se);
-        memset (((char*)p)+oc*se, 0, ((*c)-oc)*se);
+        (*c)=r;
+        p=realloc(p,r*se);
+        memset (((char*)p)+oc*se, 0, (r-oc)*se);
     }
 
     return p;
