@@ -340,7 +340,7 @@ size_t xs_http_writefiledata(xs_conn* conn, const char* path, xs_fileinfo* fdp, 
                 if (blocking==0) return tot; 
                 xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
                 xs_conn_cachepurge(conn);
-            } else if (xs_conn_error (conn) || w==0) {xs_logger_warn ("write error %zd %d", w, xs_conn_error (conn)); break;}//{if (result==0 && tot==0) tot=w; break;}
+            } else if (xs_conn_error (conn) || w<=0) {xs_logger_warn ("write error %zd %d", w, xs_conn_error (conn)); break;}//{if (result==0 && tot==0) tot=w; break;}
             tot += w;
         } while (tot<outtot);
     } else {
@@ -394,7 +394,7 @@ size_t xs_http_writefiledata(xs_conn* conn, const char* path, xs_fileinfo* fdp, 
                     if (blocking==0) {printf ("err1\n"); close(fi); return tot;} 
                     xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
                     xs_conn_cachepurge (conn);
-                } else if (xs_conn_error(conn) || w==0) break;
+                } else if (xs_conn_error(conn) || w<=0) break;
             } while (tot<outtot);
             close (fi);
         }  
