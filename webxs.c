@@ -879,20 +879,24 @@ char msg[] =
 #endif
 xs_server_ctx* gctx=0;
 static void __cdecl signal_handler(int sig_num) {
+    xs_logger_flush();
     if (gexit) exit(gexit);
     gexit = sig_num;
     xs_logger_fatal ("SIGNAL %d", sig_num);
     if (gctx) gctx = xs_server_stop(gctx);
+    xs_logger_flush();
 }
 static void __cdecl terminate_handler(void) {
     xs_logger_fatal ("TERMINATE");
     signal_handler (-3);
-    sleep(3);
+    //sleep(1);
     abort();
+    xs_logger_flush();
 }
 static void __cdecl atexit_handler(void) {
     xs_logger_fatal ("EXIT");
-    sleep(3);
+    xs_logger_flush();
+    //sleep(3);
 }
 
 //from: http://stackoverflow.com/questions/10114711/log-the-reason-for-process-termination-with-c-on-linux
@@ -1056,12 +1060,15 @@ int main(int argc, char *argv[]) {
 			while (xs_server_active(ctx)) {sleep(1);}
 			//xs_async_destroy(xas);
 			xs_logger_fatal ("---- done ----");
-			xs_conn_destroy(conn);
+			/*
+            xs_conn_destroy(conn);
 			xs_conn_destroy(conn6);
 			xs_conn_destroy(conn_ssl);
-            sleep(3);
+            */
+            //sleep(1);
             //xs_logger_destroy();
             xs_server_destroy(ctx);
+            xs_logger_counter_print();
 			myexit(1);
 		} else {
 			xs_logger_fatal ("listen error %d", err);

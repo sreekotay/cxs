@@ -148,6 +148,7 @@ xs_async_connect*   xs_async_create         (int hintsize);
 xs_async_connect*   xs_async_read           (xs_async_connect*, xs_conn*, xs_async_callback* proc); //xs_async_connect may be null
 xs_async_connect*   xs_async_listen         (xs_async_connect*, xs_conn*, xs_async_callback* proc); //xs_async_connect may be null
 xs_async_connect*   xs_async_destroy        (xs_async_connect* );
+void                xs_async_stop           (xs_async_connect* );
 int                 xs_async_active         (xs_async_connect* );
 
 //helper functions
@@ -219,7 +220,7 @@ struct xs_conn {
     SSL_CTX*            sslctx;
     SSL*                ssl;
 #endif
-    xs_arr              wcache;
+    xs_array            wcache;
     xs_async_callback*  cb;
     void*               userdata;
     char                sastr[46];
@@ -253,7 +254,7 @@ const char*  xs_conn_getsockaddrstr (const xs_conn* conn)           {return conn
 const xs_sockaddr* xs_conn_getsockaddr (const xs_conn* conn)        {return conn ? &conn->sa : 0; }
              
 int          xs_conn_cachepurge (xs_conn* conn); //forward declaration
-xs_conn*     xs_conn_create()   {return (xs_conn*)calloc(sizeof(xs_conn), 1);}
+xs_conn*     xs_conn_create()   {xs_logger_counter_add (1, 1); return (xs_conn*)calloc(sizeof(xs_conn), 1);}
 xs_conn*     xs_conn_close(xs_conn *conn) {
     struct xs_httpreq *req, *hold;
     if (conn==0) return 0;
@@ -284,8 +285,10 @@ xs_conn*     xs_conn_close(xs_conn *conn) {
 xs_conn*    xs_conn_destroy(xs_conn *conn) {
     if (conn==0) return 0;
     xs_conn_close(conn);
-    if (conn->refcount<=0)
+    if (conn->refcount<=0) {
         free(conn);
+        xs_logger_counter_add (1, -1);
+    }
     return conn;
 }
 xs_conn*    xs_conn_inc(xs_conn *conn) {
@@ -295,7 +298,7 @@ xs_conn*    xs_conn_inc(xs_conn *conn) {
 }
 xs_conn*    xs_conn_dec(xs_conn *conn) {
     if (conn==0) return 0;
-    if (xs_atomic_dec(conn->refcount)<=0)   return xs_conn_destroy(conn);
+    if (xs_atomic_dec(conn->refcount)<=1)   return xs_conn_destroy(conn);
     return conn;
 }
 xs_atomic   xs_conn_seq (xs_conn* conn) {
@@ -1338,6 +1341,7 @@ int xs_conn_printf_chunked(xs_conn *conn, const char *fmt, ...) {
 struct xs_async_connect {
     pthread_t           th;
     int                 stop;
+    xs_array            conn_arr;
     struct xs_pollfd*   xp;
     void*               userdata;
 };
@@ -1421,6 +1425,7 @@ struct xs_async_connect*  xs_async_create(int hintsize) {
     struct xs_async_connect* xas = (struct xs_async_connect*)calloc (sizeof(struct xs_async_connect), 1);
     if (xas==0)                 return 0;
     xas->xp                     = xs_pollfd_create (xs_async_handler, 0, hintsize);
+    xs_pollfd_inc               (xas->xp);
     if (xas->xp==0)             {free(xas); return 0;}
     pthread_create_detached     (&xas->th, (xs_thread_proc)async_threadproc, xas);
     if (xas->th==0)             {free(xas); return 0;}
@@ -1431,12 +1436,17 @@ struct xs_async_connect*  xs_async_create(int hintsize) {
 int xs_async_active(struct xs_async_connect* xas)                       {return xas&&xas->stop==0;}
 void xs_async_setuserdata(struct xs_async_connect* xas, void* usd)      {if (xas) xas->userdata=usd;}
 void* xs_async_getuserdata(struct xs_async_connect* xas)                {return xas ? xas->userdata : 0;}
+void xs_async_stop(struct xs_async_connect* xas)                        {if (xas) xas->stop=-2;}
 
 struct xs_async_connect* xs_async_destroy(struct xs_async_connect* xas) {
+    int i;
     if (xas==0) return 0;
     xas->stop = 1;
     xs_pollfd_stop(xas->xp);
     xs_pollfd_dec(xas->xp);
+    for (i=0; i<xs_arr_count(xas->conn_arr); i++)
+        xs_arr(xs_conn*,xas->conn_arr, i) = xs_conn_dec (xs_arr_ptr(xs_conn*,xas->conn_arr)[i]);
+    xs_arr_destroy(xas->conn_arr);
     free(xas);
     return 0;
 }
@@ -1448,6 +1458,7 @@ struct xs_async_connect*  xs_async_read(struct xs_async_connect* xas, xs_conn* c
     conn->cb = proc;
     xs_conn_inc(conn);
     xs_pollfd_push (xas->xp, xs_conn_getsock(conn), conn, 0); 
+    xs_arr_add (xs_conn*, xas->conn_arr, &conn, 1);
     return xas;
 }
 
@@ -1458,6 +1469,7 @@ struct xs_async_connect*  xs_async_listen(struct xs_async_connect* xas, xs_conn*
     conn->cb = proc;
     xs_conn_inc(conn);
     xs_pollfd_push (xas->xp, xs_conn_getsock(conn), conn, 1); 
+    xs_arr_add (xs_conn*, xas->conn_arr, &conn, 1);
     return xas;
 }
 

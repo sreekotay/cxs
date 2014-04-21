@@ -762,10 +762,11 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
             break;
     }
 
-    if (gexit) {
+   /*
+   if (gexit) {
         xs_logger_fatal ("quitting....");
-        xs_async_destroy(xas);
-    }
+        xs_async_stop(xas);
+    }*/
 
     //if (message==exs_Conn_Read && rcount==xs_conn_rcount(conn))
     //  xs_logger_error ("read error %d : %d", message, rcount);
@@ -805,7 +806,8 @@ int xs_server_active(xs_server_ctx* ctx) {
 
 xs_server_ctx* xs_server_stop (xs_server_ctx* ctx) {
     if (ctx==0) return 0;
-    ctx->xas = xs_async_destroy (ctx->xas);
+    xs_async_stop (ctx->xas);
+    //ctx->xas = xs_async_destroy (ctx->xas);
     return ctx;
 }
 
@@ -813,6 +815,7 @@ xs_server_ctx* xs_server_stop (xs_server_ctx* ctx) {
 xs_server_ctx* xs_server_destroy (xs_server_ctx* ctx) {
     if (ctx==0) return 0;
     xs_server_stop(ctx);
+    ctx->xas = xs_async_destroy (ctx->xas);
     free(ctx);
     return 0;
 }

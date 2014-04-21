@@ -42,6 +42,10 @@ int xs_logger_warn      (const char* fmt, ...);
 int xs_logger_error     (const char* fmt, ...);
 int xs_logger_fatal     (const char* fmt, ...);
 
+
+void xs_logger_counter_add      (int w, int a);
+void xs_logger_counter_print    ();
+
 #endif //header
 
 
@@ -68,6 +72,20 @@ int xs_logger_fatal     (const char* fmt, ...);
 #ifndef O_BINARY
 #define O_BINARY 0 
 #endif
+
+#define _xscounternum   4
+xs_atomic _gxscounter[_xscounternum]={0};
+void xs_logger_counter_add(int w, int a) {
+    if (w>_xscounternum || w<0) return;
+    xs_atomic_add(_gxscounter[w], a);
+}
+void xs_logger_counter_print() {
+    int i;
+    xs_printf ("xs atomic counters ");
+    for (i=0; i<_xscounternum; i++) xs_printf ("[%ld] ", _gxscounter[i]);
+    xs_printf ("\n");
+}
+
 
 typedef struct {
     char* data;

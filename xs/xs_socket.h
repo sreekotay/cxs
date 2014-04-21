@@ -215,7 +215,7 @@ xs_pollfd*  xs_pollfd_create (xs_pollfd_Proc* proc, int* listening, int listenCo
     }
 #endif
 //#undef HAVE_EPOLL
-
+    xs_logger_counter_add (0, 1);
     return xp;
 }
 
@@ -227,22 +227,22 @@ xs_pollfd*    xs_pollfd_inc(xs_pollfd *xp) {
 
 xs_pollfd*    xs_pollfd_dec(xs_pollfd *xp) {
     if (xp==0) return 0;
-    if (xs_atomic_dec(xp->refcount)<=0)   return xs_pollfd_destroy(xp);
+    if (xs_atomic_dec(xp->refcount)<=1)   return xs_pollfd_destroy(xp);
     return xp;
 }
 
 xs_pollfd*  xs_pollfd_destroy (xs_pollfd* xp) {
     struct xs_pollfd* n;
     xs_pollfd_stop (xp);
-    while (xp==xp->root && xp->next) {
+    while (xp==xp->root && xp->next && xp->running>=0) {
         xs_pollfd_Wake(xp->next, 0);
         sched_yield();
     }
     while ((n=xp->next)) {
-        xs_pollfd_Delete(n);
-        free (n);
+        xs_pollfd_dec(n);
+        //free (n);
     }
-    if (xp->ctx) {
+    if (xp->ctx && (xp->root==0 || xp==xp->root)) {
         free (xp->ctx);
         xp->ctx=0;
     }
@@ -252,6 +252,7 @@ xs_pollfd*  xs_pollfd_destroy (xs_pollfd* xp) {
 #endif    
     xs_pollfd_Delete(xp);
     free(xp);
+    xs_logger_counter_add (0, -1);
     return 0;
 }
 
@@ -586,12 +587,12 @@ int xs_pollfd_Init(xs_pollfd* xp, xs_pollfd* root, int pfdTotal) {
         root->next = xp;
         xp->xpi = xs_atomic_inc(root->xpi)+1;
         xp->ctx = root->ctx;
+        xs_pollfd_inc (xp);
     } else xp->root = xp;
     xs_logger_info ("xp count:%d size:%d", 
         pfdTotal,
         (int)((sizeof(struct xs_socket)+sizeof(struct pollfd))*pfdTotal + sizeof(*xp))
         );
-
     return 0;
 }
 
@@ -639,7 +640,10 @@ xs_pollfd* xs_pollfd_Find(xs_pollfd* xp, int pfdTotal) {
     }
     if (xp==0) {
         xp = (struct xs_pollfd*)calloc (1, sizeof(xs_pollfd));
-        if (xp) xs_pollfd_Init (xp, root, pfdTotal);
+        if (xp) {
+            xs_pollfd_Init (xp, root, pfdTotal);
+            xs_logger_counter_add (0, 1);
+        }
         //printf ("run reason %d\n", 
     }
 
