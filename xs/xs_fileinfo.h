@@ -115,6 +115,7 @@ pthread_rwlock_t gxs_stat_rwlock;
 pthread_mutex_t gxs_statmutex;
 
 int xs_fileinfo_init() {
+    if (gxs_statptr) return 0;
     gxs_statptr = kh_init_statptr();
     pthread_mutex_init(&gxs_statmutex, 0);
     pthread_rwlock_init(&gxs_stat_rwlock, 0);

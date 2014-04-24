@@ -11,8 +11,7 @@
 // =================================================================================================================
 typedef int (*xs_signal_cb) (int signal, void* userData);
 enum {
-	exs_Start_SSL			= 1<<0,
-	exs_Start_Signal		= 1<<1,
+	exs_Start_Signal		= 1<<0,
 	exs_Start_CrashLog		= 1<<1,
 	exs_Start_All			= -1
 };
@@ -31,12 +30,6 @@ void	xs_startup			(int flags, xs_signal_cb* proc, void* userdata);
 #ifdef _xs_IMPLEMENTATION_
 #ifndef _xs_STARTUP_IMPL_
 #define _xs_STARTUP_IMPL_
-
-
-#undef _xs_IMPLEMENTATION_
-#include "xs_fileinfo.h"
-#include "xs_ssl.h"
-#define _xs_IMPLEMENTATION_
 
 
 #ifndef WIN32
@@ -121,9 +114,7 @@ static void xs_register_crash_handler(void) {
 void xs_startup(int flags, xs_signal_cb* proc, void* data) {
     gsig_cb = proc;
 	gsig_data = data;
-    xs_fileinfo_init();
     xs_logger_init();
-	xs_SSL_initialize ();	
     xs_register_crash_handler();
     atexit (xs_atexit_handler);
 }

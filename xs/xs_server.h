@@ -16,6 +16,8 @@ int                     xs_server_listen            (xs_server_ctx* ctx, xs_conn
 int                     xs_server_active            (xs_server_ctx* ctx);
 xs_server_ctx*          xs_server_stop              (xs_server_ctx* ctx);
 xs_server_ctx*          xs_server_destroy           (xs_server_ctx* ctx);
+
+int                     xs_server_init_all          (); 
 int                     xs_server_terminate_all     (int signal, void *dummy); //callback for signalling
 
 
@@ -819,6 +821,12 @@ xs_server_ctx* xs_server_destroy (xs_server_ctx* ctx) {
     } else {assert(0);}
     xs_atomic_spin (xs_atomic_swap(gserverlistlock,1,0)!=0);
     free(ctx);
+    return 0;
+}
+
+int xs_server_init_all() {
+    xs_fileinfo_init();
+	xs_SSL_initialize ();	
     return 0;
 }
 

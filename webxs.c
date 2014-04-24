@@ -900,6 +900,7 @@ int main(int argc, char *argv[]) {
 
 #endif
     xs_startup(exs_Start_All, xs_server_terminate_all, 0);
+    xs_server_init_all ();
 
 	
 	if (1) {
