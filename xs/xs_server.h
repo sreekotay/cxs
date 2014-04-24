@@ -4,18 +4,19 @@
 #ifndef _xs_SERVER_H_
 #define _xs_SERVER_H_
 
+#include "xs_connection.h"
+
 typedef struct xs_server_ctx        xs_server_ctx;
-typedef struct xs_async_connect     xs_async_connect;
-typedef struct xs_conn              xs_conn;
 
 // =================================================================================================================
 // function declarations
 // =================================================================================================================
-xs_server_ctx*          xs_server_create    (const char* rel_path, const char* root_path);
-int                     xs_server_listen    (xs_server_ctx* ctx, xs_conn* conn);
-int                     xs_server_active    (xs_server_ctx* ctx);
-xs_server_ctx*          xs_server_stop      (xs_server_ctx* ctx);
-xs_server_ctx*          xs_server_destroy   (xs_server_ctx* ctx);
+xs_server_ctx*          xs_server_create            (const char* rel_path, const char* root_path);
+int                     xs_server_listen            (xs_server_ctx* ctx, xs_conn* conn);
+int                     xs_server_active            (xs_server_ctx* ctx);
+xs_server_ctx*          xs_server_stop              (xs_server_ctx* ctx);
+xs_server_ctx*          xs_server_destroy           (xs_server_ctx* ctx);
+int                     xs_server_terminate_all     (int signal, void *dummy); //callback for signalling
 
 
 #endif //header
@@ -36,13 +37,15 @@ xs_server_ctx*          xs_server_destroy   (xs_server_ctx* ctx);
 #include "xs_arr.h"
 #include "xs_queue.h"
 
-typedef struct xs_server_ctx {
+struct xs_server_ctx {
     char server_name[PATH_MAX];
     char document_root[PATH_MAX];
     struct xs_async_connect* xas;
     xs_queue writeq;
-}xs_server_ctx;
+};
 
+xs_atomic gserverlistlock=0;
+xs_array  gserverlist={0};
 
 // ==================================================
 //  directory stuff
@@ -674,12 +677,11 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
     int n, s, err=0, sock=0, rr, lcount=0;
     xs_atomic rcount = xs_conn_rcount(conn);
     const char* h;
-    //if (message!=exs_Conn_Idle) xs_logger_info ("entering %d", message);
     switch (message) {
         case exs_Conn_New:
             break;
         case exs_Conn_Read:
-            cbcc++;
+            xs_atomic_inc (cbcc);
             while (err==0 && ((n=xs_conn_httpread(conn, buf, sizeof(buf)-1, &rr))>0 || rr)) {
                 lcount++;
                 if ((s=xs_conn_state (conn))==exs_Conn_Complete || n>0) {// || s==exs_Conn_Websocket) {//n>0) {
@@ -762,17 +764,7 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
             break;
     }
 
-   /*
-   if (gexit) {
-        xs_logger_fatal ("quitting....");
-        xs_async_stop(xas);
-    }*/
-
-    //if (message==exs_Conn_Read && rcount==xs_conn_rcount(conn))
-    //  xs_logger_error ("read error %d : %d", message, rcount);
-
-    //if (message!=exs_Conn_Idle) xs_logger_info ("exiting %d - %d", message, lcount);
-    return err;
+   return err;
 }
 
 // ==================================================
@@ -787,6 +779,10 @@ xs_server_ctx* xs_server_create(const char* rel_path, const char* root_path) {
     xs_queue_launchthreads (&ctx->writeq, 2, 0);
     xs_async_setuserdata(xas, ctx);
     ctx->xas = xas;
+
+    xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
+    xs_arr_add (xs_server_ctx*, gserverlist, &ctx, 1); 
+    xs_atomic_spin (xs_atomic_swap(gserverlistlock,1,0)!=0);
     return ctx;
 }
 
@@ -807,19 +803,39 @@ int xs_server_active(xs_server_ctx* ctx) {
 xs_server_ctx* xs_server_stop (xs_server_ctx* ctx) {
     if (ctx==0) return 0;
     xs_async_stop (ctx->xas);
-    //ctx->xas = xs_async_destroy (ctx->xas);
     return ctx;
 }
 
 
 xs_server_ctx* xs_server_destroy (xs_server_ctx* ctx) {
+    int i;
     if (ctx==0) return 0;
     xs_server_stop(ctx);
     ctx->xas = xs_async_destroy (ctx->xas);
+    xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
+    for (i=0; i<xs_arr_count (gserverlist) && xs_arr(xs_server_ctx*, gserverlist, i)!=ctx; i++)  {}
+    if (i<xs_arr_count (gserverlist)) {
+        xs_arr_remove (xs_server_ctx*, gserverlist, i, 1); 
+    } else {assert(0);}
+    xs_atomic_spin (xs_atomic_swap(gserverlistlock,1,0)!=0);
     free(ctx);
     return 0;
 }
 
+int xs_server_terminate_all(int signal, void *dummy) {
+    int i;
+    xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
+    for (i=xs_arr_count (gserverlist)-1; i>=0; i--) {
+        xs_server_ctx* ctx = xs_arr(xs_server_ctx*, gserverlist, i);
+        xs_atomic_spin (xs_atomic_swap(gserverlistlock,1,0)!=0);
+        xs_server_destroy (ctx);
+        xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
+    }
+    xs_atomic_spin (xs_atomic_swap(gserverlistlock,1,0)!=0);
+    return 0;
+}
+
+
 
 #endif //_xs_SERVER_IMPL_
-#endif //_xs_IMPLEMENTATION_
+#endif //_xs_IMPLEMENTATION_    

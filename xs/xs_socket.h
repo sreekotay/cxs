@@ -232,15 +232,19 @@ xs_pollfd*    xs_pollfd_dec(xs_pollfd *xp) {
 }
 
 xs_pollfd*  xs_pollfd_destroy (xs_pollfd* xp) {
-    struct xs_pollfd* n;
+    struct xs_pollfd *n, *nn;
     xs_pollfd_stop (xp);
     while (xp==xp->root && xp->next && xp->running>=0) {
         xs_pollfd_Wake(xp->next, 0);
         sched_yield();
     }
-    while ((n=xp->next)) {
-        xs_pollfd_dec(n);
-        //free (n);
+    if (xp==xp->root) {
+        n = xp;
+        nn = xp->next;
+        while ((n=nn)) {
+            nn = n->next;
+            xs_pollfd_dec(n);
+        }
     }
     if (xp->ctx && (xp->root==0 || xp==xp->root)) {
         free (xp->ctx);
@@ -378,11 +382,13 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
             } else i = xp->pfdCount;
             xp->pfdCount++;
             if (xp->freesid<0) {
+                assert (i>=0 && i<xp->pfdTotal);
                 xp->sidmap[i]   = i;
                 xp->pss[i].sid  = i;
             } else {            
                 int fi          = xp->freesid;
-                xp->freesid     = xp->sidmap[xp->freesid];
+                assert (fi>=0 && fi<xp->pfdTotal);
+                xp->freesid     = xp->sidmap[fi];
                 xp->sidmap[fi]  = i;
                 xp->pss[i].sid  = fi;
             }                   
@@ -534,6 +540,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
             #ifndef HAVE_EPOLL
                 xp->pfd[ip]=xp->pfd[i];
                 xp->pss[ip]=xp->pss[i];
+                assert (xp->pss[i].sid>=0 && xp->pss[i].sid<xp->pfdTotal);
                 if (xs_sock_invalid(xp->pfd[i].fd)) {
                     xp->sidmap[xp->pss[i].sid]      = xp->freesid;
                     xp->freesid                     = xp->pss[i].sid;

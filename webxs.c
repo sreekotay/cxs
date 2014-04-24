@@ -46,6 +46,7 @@
 #include "xs/xs_logger.h"
 #include "xs/xs_fileinfo.h"
 #include "xs/xs_server.h"
+#include "xs/xs_startup.h"
 
 
 int gexit = 0;
@@ -874,81 +875,6 @@ char msg[] =
 
 
 
-#ifndef WIN32
-#define __cdecl
-#endif
-xs_server_ctx* gctx=0;
-static void __cdecl signal_handler(int sig_num) {
-    xs_logger_flush();
-    if (gexit) exit(gexit);
-    gexit = sig_num;
-    xs_logger_fatal ("SIGNAL %d", sig_num);
-    if (gctx) gctx = xs_server_stop(gctx);
-    xs_logger_flush();
-}
-static void __cdecl terminate_handler(void) {
-    xs_logger_fatal ("TERMINATE");
-    signal_handler (-3);
-    //sleep(1);
-    abort();
-    xs_logger_flush();
-}
-static void __cdecl atexit_handler(void) {
-    xs_logger_fatal ("EXIT");
-    xs_logger_flush();
-    //sleep(3);
-}
-
-//from: http://stackoverflow.com/questions/10114711/log-the-reason-for-process-termination-with-c-on-linux
-#ifndef WIN32
-#include <execinfo.h>
-#endif
-static void log_stack_trace() {
-#ifndef WIN32
-    void *arr[256];
-    size_t frames = backtrace(arr, sizeof(arr)), i;
-    
-    char **strings = backtrace_symbols(arr, frames);
-    if (strings) {
-        xs_logger_fatal("log_stack_trace: begin [%zd frames]", frames);
-        for (i=0; i<frames; i++) xs_logger_fatal("  log_stack %s", strings[i]);
-        xs_logger_fatal("log_stack_trace: end");
-        free(strings);
-    }
-    else 
-#endif
-         xs_logger_fatal("log_stack_trace: error - unable to generate stack trace.");
-}
-
-static void crash_handler(int sig) {
-    // Uninstall this handler, to avoid the possibility of an infinite regress
-    signal(SIGSEGV, SIG_DFL);
-    signal(SIGILL,  SIG_DFL);
-    signal(SIGABRT, SIG_DFL);
-    signal(SIGFPE,  SIG_DFL);
-#ifndef WIN32
-    signal(SIGBUS,  SIG_DFL);
-#endif
-
-    xs_logger_fatal("crash_handler signal %i... ", sig);
-    log_stack_trace();
-    xs_logger_fatal("crash_handler aborting.");
-    xs_logger_flush();
-    abort();
-}
-
-static void register_crash_handler(void) {
-	signal(SIGTERM, signal_handler);
-	signal(SIGINT,  signal_handler);
-    signal(SIGSEGV, crash_handler);
-    signal(SIGILL,  crash_handler);
-    signal(SIGABRT, crash_handler);
-    signal(SIGFPE,  crash_handler);
-#ifndef WIN32
-    signal(SIGBUS,  crash_handler);
-    signal(SIGPIPE, SIG_IGN);
-#endif
-}
 
 
 int dodecompress(char* path);
@@ -973,9 +899,7 @@ int main(int argc, char *argv[]) {
     }
 
 #endif
-    register_crash_handler();
-    //set_terminate (terminate_handler);
-    atexit (atexit_handler);
+    xs_startup(exs_Start_All, xs_server_terminate_all, 0);
 
 	
 	if (1) {
@@ -1020,10 +944,6 @@ int main(int argc, char *argv[]) {
 #ifdef _old_file_stuff_
         my_statHashInit();
 #endif
-        xs_fileinfo_init();
-        xs_logger_init();
-		xs_SSL_initialize ();	
-
         if (accesslog==0) xs_logger_level(exs_Log_Error, exs_Log_Info);
        
        // broadcastmdns ();
@@ -1046,7 +966,6 @@ int main(int argc, char *argv[]) {
 		}
 		if (err==0) {
             xs_server_ctx *ctx = xs_server_create(".", argv[0]);
-            gctx = ctx;
             /*
 			xs_server_ctx ctx = {0};
 			struct xs_async_connect* xas=xs_async_create(32);
@@ -1199,6 +1118,7 @@ int main(int argc, char *argv[]) {
 #include "xs/xs_logger.h"
 #include "xs/xs_fileinfo.h"
 #include "xs/xs_server.h"
+#include "xs/xs_startup.h"
 #undef _xs_IMPLEMENTATION_
 
 #define CHUNK   1024

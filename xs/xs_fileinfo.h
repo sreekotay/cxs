@@ -145,7 +145,7 @@ void xs_fileinfo_global_lockstatus(int oldstatus, int newstatus) {
         xs_atomic_spin (xs_atomic_swap(gxs_statwrite,0,1)!=0);
         //xs_atomic_inc (gxs_statwrite);
         if (oldstatus==1) xs_atomic_dec (gxs_statread);
-        xs_atomic_spin_do(gxs_statread, printf ("yield hash\n"));
+        xs_atomic_spin_do(gxs_statread, {});//printf ("yield hash\n"));
        return;
     }
     if (oldstatus==2) {
@@ -158,7 +158,7 @@ void xs_fileinfo_global_lockstatus(int oldstatus, int newstatus) {
         return;
     }
     if (oldstatus==0) {
-        xs_atomic_spin_do(gxs_statwrite, printf ("yield file\n"));
+        xs_atomic_spin_do(gxs_statwrite, {});//printf ("yield file\n"));
         //xs_atomic_spin_do(xs_atomic_swap(gxs_statwrite,0,1)!=0, printf ("yield file\n"));
         //xs_atomic_spin (xs_atomic_swap(gxs_statwrite,0,1)!=0);
         xs_atomic_inc (gxs_statread);

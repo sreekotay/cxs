@@ -99,6 +99,7 @@
     <ClInclude Include="..\..\xs\xs_sha1.h" />
     <ClInclude Include="..\..\xs\xs_socket.h" />
     <ClInclude Include="..\..\xs\xs_ssl.h" />
+    <ClInclude Include="..\..\xs\xs_startup.h" />
     <ClInclude Include="..\..\xs\xs_types.h" />
     <ClInclude Include="..\..\xs\xs_utils.h" />
   </ItemGroup>

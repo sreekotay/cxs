@@ -8,7 +8,6 @@
 // =================================================================================================================
 // function declarations
 // =================================================================================================================
-typedef struct xs_compress xs_compress;
 enum {
     exs_Log_All,
     exs_Log_Trace,
@@ -126,6 +125,7 @@ void xs_log_flush_threadproc(xs_log* log);
 int xs_log_create(xs_log* log, const char* path) {
     memset(log, 0, sizeof(xs_log));
 
+    pthread_mutex_init (&log->mutex, 0);
     xs_strlcpy (log->path, path, sizeof(log->path));
     /*
     log->f = fopen(path, "a");
@@ -139,7 +139,6 @@ int xs_log_create(xs_log* log, const char* path) {
     log->echolevel = exs_Log_Info;
     log->running = 1;
     xs_arr_create (log->buffered);
-    pthread_mutex_init (&log->mutex, 0);
     pthread_create_detached (&log->flushth, (xs_thread_proc)xs_log_flush_threadproc, log);
 
     return 0;
@@ -191,7 +190,7 @@ void xs_log_flush_threadproc(xs_log* log) {
     do {
         count = xs_arr_count(log->buffered);
         sleep(1);
-        if (xs_arr_count(log->buffered)==count && log->running)
+        if (xs_arr_count(log->buffered)!=count && log->running) //should this be == or != ?
             xs_log_flush(log, 1);
     } while (log->running);
 }

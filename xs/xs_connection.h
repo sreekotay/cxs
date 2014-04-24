@@ -5,6 +5,7 @@
 #define _xs_CONNECTION_H_
 
 #include "xs_atomic.h"
+#include "xs_socket.h"
 
 //messages
 enum {
@@ -64,7 +65,6 @@ enum {
 // ======================================================================
 typedef struct xs_conn xs_conn;
 typedef struct xs_httpreq xs_httpreq;
-typedef union xs_sockaddr xs_sockaddr;
 
 
 //manage
@@ -1427,9 +1427,9 @@ struct xs_async_connect*  xs_async_create(int hintsize) {
     xas->xp                     = xs_pollfd_create (xs_async_handler, 0, hintsize);
     xs_pollfd_inc               (xas->xp);
     if (xas->xp==0)             {free(xas); return 0;}
+    xs_pollfd_set_userdata      (xas->xp, xas);
     pthread_create_detached     (&xas->th, (xs_thread_proc)async_threadproc, xas);
-    if (xas->th==0)             {free(xas); return 0;}
-    xs_pollfd_set_userdata (xas->xp, xas);
+    if (xas->th==0)             {xs_pollfd_destroy(xas->xp); free(xas); return 0;}
     return xas;
 }
 
