@@ -987,7 +987,8 @@ int main(int argc, char *argv[]) {
             */
             //sleep(1);
             //xs_logger_destroy();
-            xs_server_destroy(ctx);
+            //xs_server_destroy(ctx);
+            xs_server_terminate_all(0,0);
             xs_logger_counter_print();
 			myexit(1);
 		} else {

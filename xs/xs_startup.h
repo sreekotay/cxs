@@ -16,7 +16,7 @@ enum {
 	exs_Start_All			= -1
 };
 
-void	xs_startup			(int flags, xs_signal_cb* proc, void* userdata);
+void	xs_startup			(int flags, xs_signal_cb proc, void* userdata);
 
 #endif //_xs_STARTUP_H_
 
@@ -105,13 +105,13 @@ static void xs_register_crash_handler(void) {
     signal(SIGABRT, xs_crash_handler);
     signal(SIGFPE,  xs_crash_handler);
 #ifndef WIN32
-    signal(SIGBUS,  crash_handler);
+    signal(SIGBUS,  xs_crash_handler);
     signal(SIGPIPE, SIG_IGN);
 #endif
 }
 
 
-void xs_startup(int flags, xs_signal_cb* proc, void* data) {
+void xs_startup(int flags, xs_signal_cb proc, void* data) {
     gsig_cb = proc;
 	gsig_data = data;
     xs_logger_init();
