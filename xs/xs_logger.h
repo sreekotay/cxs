@@ -64,8 +64,11 @@ void xs_logger_counter_print    ();
 #ifdef WIN32
 #include <io.h>
 #endif
+#include <string.h>
+
 #include "xs_atomic.h"
 #include "xs_queue.h"
+#include "xs_arr.h"
 #define _xs_IMPLEMENTATION_
 
 #ifndef O_BINARY
@@ -272,7 +275,8 @@ const char* xs_timestr_now(void) {return xs_timestr(0, 0, 0);}
 
 xs_log gxslog = {0};
 int xs_logger_init () {
-    xs_log_create(&gxslog, "./.mylog.log");
+    if (gxslog.running==0)
+        xs_log_create(&gxslog, "./.mylog.log");
     return 0;
 }
 int xs_logger_level (int newfilelevel, int newecholevel) {

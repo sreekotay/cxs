@@ -18,6 +18,7 @@ static int xs_printf_va (const char* fmt, va_list apin);
 static int xs_sprintf_va (char* str, int len, const char* fmt, va_list apin);
 static int xs_fprintf_va (FILE* f, const char* fmt, va_list apin);
 static int xs_sprintf_core (xs_sprintflush* sflush, void* userdata, char* str, int len, const char* fmt, va_list apin);
+static int xs_sprintf_len (const char* fmt, va_list apin)   {return xs_sprintf_core (0, 0, 0, 0, fmt, apin);}
 
 
 

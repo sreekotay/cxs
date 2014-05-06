@@ -17,8 +17,11 @@
 #ifndef O_BINARY
 #define O_BINARY 0 
 #endif //O_BINARY
+#else
+#include <time.h>
 #endif
 
+#include <stdio.h>
 
 static char      xs_path_isabsolute  (const char *path);
 static void      xs_path_setabsolute (char *path, int pathsize, const char *rootpath, const char* exepath);
@@ -662,6 +665,9 @@ static char xs_path_isabsolute(const char *path) {
 }
 
 #include "xs_printf.h"
+
+#ifdef WIN32
+#endif
 
 static void xs_path_setabsolute(char *path, int pathsize, const char *rootpath, const char* exepath) {
 	char abs[PATH_MAX];

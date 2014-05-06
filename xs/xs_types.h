@@ -5,6 +5,7 @@
 #define _xs_TYPES_H_
 
 #include <limits.h>
+#include <stdarg.h>
 
 #if UINT_MAX==0xffffu           //int is 16-bits
 typedef char                    xsint8;

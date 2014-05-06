@@ -10,6 +10,26 @@
 #endif
 #endif //NO_IPV6
 
+#ifdef WIN32
+#ifndef FD_SETSIZE
+#define FD_SETSIZE 1024
+#endif //FD_SETSIZE
+#include <ws2tcpip.h>
+#include <winsock2.h>
+#include <windows.h>
+#include <fcntl.h>
+#else
+#if __TINYC__
+#else
+//#define FD_SETSIZE 4096
+#endif
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#endif
+
+
 // =================================================================================================================
 //  interface and functions -- declarations
 // =================================================================================================================
@@ -51,6 +71,7 @@ int             xs_pollfd_setrunning            (xs_pollfd* xp, int state);
 int             xs_pollfd_stop                  (xs_pollfd* xp); //convenience -- called by destroy already
 xs_pollfd*      xs_pollfd_inc                   (xs_pollfd *xp);
 xs_pollfd*      xs_pollfd_dec                   (xs_pollfd *xp);
+int             xs_pollfd_print                 (xs_pollfd* xp);
 
 //socket convenience functions
 int             xs_sock_open                    (int* sock, const char *host, int port, char use_tcp);
@@ -100,12 +121,17 @@ int             xs_sock_err                     ();
 
 #undef _xs_IMPLEMENTATION_
 #include <assert.h>
+#include <errno.h>
 #include "xs_atomic.h"
 #include "xs_posix_emu.h"
 #include "xs_queue.h"
 #include "xs_SSL.h"
 #include "xs_logger.h"
 #define _xs_IMPLEMENTATION_
+
+#ifdef _MSC_VER
+#pragma comment(lib, "Ws2_32.lib")
+#endif
 
 #if (!defined WIN32)&& (!defined HAVE_EPOLL)
 //#define HAVE_EPOLL
@@ -143,7 +169,7 @@ struct xs_pollfd {
     int*                    sidmap;
     struct pollfd*          pfd;
     struct xs_socket*       pss;
-    int                     pfdCount, pfdTotal;
+    int                     pfdCount, pfdTotal, pfdMax;
     int*                    sockArr;
     xs_atomic               sockCount, sockSpace, sockLock;
     struct xs_pollctx*      ctx;
@@ -211,7 +237,7 @@ xs_pollfd*  xs_pollfd_create (xs_pollfd_Proc* proc, int* listening, int listenCo
     for (i=0; i<xp->listenCount; i++) {
         struct epoll_event epd = {0};
         epd.events = xp->pfd[i].events;
-        //epoll_ctl (xp->epfd, EPOLL_CTL_ADD, listening[i], &epd);
+        epoll_ctl (xp->epfd, EPOLL_CTL_ADD, listening[i], &epd);
     }
 #endif
 //#undef HAVE_EPOLL
@@ -359,6 +385,7 @@ int xs_pollfd_push (xs_pollfd* xp, int sock, void* userdata, char listener) {
 //  core function
 // =================================================================================================================
 void* xs_Pollthread3 (struct xs_pollfd* xp) {
+    time_t ct=0, pt=0; 
     xs_queue* qp = &xp->ctx->acceptqueue;
     struct xs_queuesock qs={0};
 #ifdef HAVE_EPOLL
@@ -375,23 +402,32 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         // ==========================
         while (xp->pfdCount<xp->pfdTotal &&
                xs_queue_pop (qp, &qs, 0)==0) {
-            int i;
+            int i, fi;
             if (qs.listener!=0) {
                 i = xp->listenCount++;
-                memcpy (xp->pfd+i, xp->pfd+xp->pfdCount, sizeof(xp->pfd[i])); //copy to end
-            } else i = xp->pfdCount;
+                memcpy (xp->pfd+i, xp->pfd+xp->pfdMax, sizeof(xp->pfd[i])); //copy to end
+            } else i = xp->pfdMax;
             xp->pfdCount++;
             if (xp->freesid<0) {
                 assert (i>=0 && i<xp->pfdTotal);
                 xp->sidmap[i]   = i;
-                xp->pss[i].sid  = i;
+                xp->pss[i].sid  = fi = i;
+                xp->pfdMax++;
             } else {            
-                int fi          = xp->freesid;
+                fi              = xp->freesid;
                 assert (fi>=0 && fi<xp->pfdTotal);
                 xp->freesid     = xp->sidmap[fi];
+             #ifdef HAVE_EPOLL
+                i               = fi;
                 xp->sidmap[fi]  = i;
                 xp->pss[i].sid  = fi;
-            }                   
+                printf ("over\n");
+             #else
+                xp->sidmap[fi]  = i;
+                xp->pss[i].sid  = fi;
+                xp->pfdMax++;
+             #endif
+           }                   
             xp->pfd[i].events   = POLLIN;
             xp->pfd[i].fd       = qs.s;
             xp->pss[i].sa       = qs.sa;
@@ -401,17 +437,20 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
             else xp->pss[i].cfd = qs.userdata;
         #ifdef HAVE_EPOLL
             if (xp->epfd) {
-                struct epoll_event epd;
+                struct epoll_event epd = {0};
                 epd.events = xp->pfd[i].events;
-                epd.data.u32 = i;
+                epd.data.u32 = fi;
+                printf ("add %d: sock[%d]\n", i, xp->pfd[i].fd);
                 epoll_ctl (xp->epfd, EPOLL_CTL_ADD, xp->pfd[i].fd, &epd);
             }
+        #else
+            assert (xp->pfdMax==xp->pfdCount);
         #endif
             xs_pollfd_setrunning(xp, 1);
             rret = 1; //need this if its a "while"
         }
 
-        //launch new thread if necessary
+        //launch new thread if necessaryp
         if (xs_atomic_swap (xp->ctx->expandlock, 0, 1)==0) {
             if (qp->qDepth) {// && xp==xp->root) {
                 struct xs_pollfd* nxp;
@@ -434,18 +473,37 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         (void)(*cbproc) (xp, exs_pollfd_Idle, 0, -1, 0);
         xs_pollfd_setrunning(xp, 1);
     #ifdef HAVE_EPOLL
-        if (xp->pfdCount)
-            rret = epoll_wait(xp->epfd, eevents, xp->pfdCount, rret||(qp->qDepth&&xp->pfdCount<xp->pfdTotal) ? 0 : 100 + xp->xpi*5);
+       //printf ("poll %d\n", xp->pfdMax);
+       if (xp->pfdCount)
+            rret = epoll_wait(xp->epfd, eevents, xp->pfdMax, rret||(qp->qDepth&&xp->pfdCount<xp->pfdTotal) ? 0 : 100 + xp->xpi*5);
         else rret = 0;
     #else
-        rret = poll(xp->pfd, xp->pfdCount, rret||(qp->qDepth&&xp->pfdCount<xp->pfdTotal) ? 0 : 20 + xp->xpi*5);//(/*xp==xp->root*/xp->xpi<4 ? 20 : 200));
+        rret = poll(xp->pfd, xp->pfdCount, (rret>0)||(qp->qDepth&&(!xs_queue_full(qp))&&xp->pfdCount<xp->pfdTotal) ? 0 : 20 + xp->xpi*10);//(/*xp==xp->root*/xp->xpi<4 ? 20 : 200));
+        /*
+        do {
+            rret = poll(xp->pfd, xp->pfdCount, rret>0 ? 0 : (xp->root==xp?20:200));//ret>0 (rret>0) ? 0 : 20 + xp->xpi*10);//(xp->xpi<4 ? 20 : 200));
+            ct = time(NULL);
+        } while (rret==0 && pt==ct);
+        pt = ct;
+        */
+         if (0) {//xp->pfdCount>xp->listenCount && 1) {
+            static time_t ct = 0, pt = 0;
+            ct = time(0);
+            if (ct+1>pt)
+                // (xp->pfdCount>xp->listenCount || (/*xp->root==xp &&*/ xp->listenCount) || xp->sockCount || (xp->ctx && xp->ctx->acceptqueue.qDepth && xp->pfdCount<xp->pfdTotal));
+
+                printf ("rret[%d] = pfd[%d] listen[%d] sockc[%d] queueDepth[%d] xp[0x%lx][%d] tc[%d]\n", rret, 
+                xp->pfdCount, (int)xp->listenCount, (int)xp->sockCount, (int)xp->ctx->acceptqueue.qDepth,
+                (unsigned long)xp, (int)xp->xpi, (int)xp->ctx->threadcount);
+            pt=ct;
+        }
     #endif
         if (rret<0) {
             int err = xs_sock_err();
             if (err && xs_sock_wouldblock(err)==0) 
                 err=err;
         }
-        if (0)
+        if (0 && rret && xp->pfdCount>xp->listenCount)
             printf ("rret[%d] = pfd[%d] conncount[%d] qd[%d] xpi[%d] xp[0x%lx][%d] tc[%d]\n", rret, 
                 xp->pfdCount, (int)-1002, (int)qp->qDepth, (int)xp->root->xpi,
                 (unsigned long)xp, (int)xp->xpi, (int)xp->ctx->threadcount);
@@ -454,7 +512,10 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         #ifdef HAVE_EPOLL
             int i, rc;
             for (rc=0; rc<rret; rc++) {
-                i = eevents[rc].data.u32;
+                i = xp->sidmap[eevents[rc].data.u32];
+                if (xp->pss[i].sid!=i) {printf ("event on closed socket\n"); continue;}
+
+                assert (xp->pss[i].sid==i && i>=0 && i<xp->pfdMax);
                 xp->pfd[i].revents = eevents[rc].events;
         #else
             int i, ip;
@@ -480,7 +541,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
                                          xp->pfd[i].fd, xp->pss[i].sid, (void*)(xp->pss[i].cfd));
                     }
                 #ifdef HAVE_EPOLL
-                    if (1) {
+                    if (0) {
                         struct epoll_event epd = {0}; 
                         printf ("delete\n");
                         epoll_ctl (xp->epfd, EPOLL_CTL_DEL, xp->pfd[i].fd, &epd);
@@ -546,17 +607,29 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
                     xp->freesid                     = xp->pss[i].sid;
                 } else xp->sidmap[xp->pss[ip].sid]  = ip;
                 ip += xs_sock_valid(xp->pfd[i].fd);
+            #else
             #endif
                 if (xp->running<0) break;
             }
         #ifndef HAVE_EPOLL
-            if (xp->running>0) xp->pfdCount=ip;
+            if (xp->running>0) xp->pfdMax=xp->pfdCount=ip;
+        #else
+            for (i=0; i<xp->pfdMax; i++) {
+                if (xp->pss[i].sid!=i) continue;
+                if (xs_sock_invalid(xp->pfd[i].fd)) {
+                    printf ("done %d\n", i);
+                    xp->sidmap[xp->pss[i].sid]      = xp->freesid;
+                    xp->freesid                     = xp->pss[i].sid;
+                    xp->pss[i].sid                  = -1;
+                    xp->pfdCount--;
+                }
+            }
         #endif
         }
 
         //if (xp->root==xp || 1) 
         while (xp->running>0 && !xs_pollfd_Processing(xp)) {
-            if (qp && qp->qDepth==0) xs_pollfd_Sleep(xp);
+            if (qp && qp->qDepth==0) {/*break;*/ xs_pollfd_Sleep(xp); }
         }
     } while (xp->running>0 && xs_pollfd_Processing(xp));
     xs_pollfd_setrunning(xp, -1); //dead
@@ -564,11 +637,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
 #ifdef HAVE_EPOLL
     if (eevents) free(eevents);
 #endif
-    /*
-    if (xp->root!=xp) {
-        xs_pollfd_Delete  (xp);
-        xs_pollfd_dec     (xp);
-    }*/
+    xs_logger_info ("xp thread exit-- xp[%d]: r[%d] pfdt[%d] of [%d]", (int)xp->xpi, (int)xp->running, (int)xp->pfdCount, (int)xp->pfdTotal);
     xs_pollfd_dec (xp);
     return 0;
 }
@@ -630,6 +699,14 @@ int xs_pollfd_Clean(xs_pollfd* inxp) {
     return 0;
 }
 
+int xs_pollfd_print(xs_pollfd* xp) {
+    xs_pollfd* root = xp->root;
+    xs_logger_info ("thread needed...%d", (int)root->xpi);
+    if (1) for (xp=root; xp!=0; xp=xp->next)
+        xs_logger_info ("   xp[%d]: r[%d] pfdt[%d] of [%d]", (int)xp->xpi, (int)xp->running, (int)xp->pfdCount, (int)xp->pfdTotal);
+    return 0;
+}
+
 xs_pollfd* xs_pollfd_Find(xs_pollfd* xp, int pfdTotal) {
     xs_pollfd* root = xp ? xp->root : 0;
     if (xp &&  xp->pfdCount+(xp->pfdCount>>0)+xp->sockCount >= xp->pfdTotal) {
@@ -639,13 +716,10 @@ xs_pollfd* xs_pollfd_Find(xs_pollfd* xp, int pfdTotal) {
                 (xp->running==1 && xp==root && (xp->pfdCount+xp->sockCount)<(xp->pfdTotal>>0)))
                 break;
         }
-        if (xp==0) {// && inxp!=root) {
-            xs_logger_info ("thread needed...%d", (int)root->xpi);
-            if (1) for (xp=root; xp!=0; xp=xp->next)
-                xs_logger_info ("   xp[%d]: r[%d] pfdt[%d] of [%d]", (int)xp->xpi, (int)xp->running, (int)xp->pfdCount, (int)xp->pfdTotal);
-        }
+        if (xp==0) // && inxp!=root)
+            xs_pollfd_print (root);
     }
-    if (xp==0) {
+    if (xp==0 || (xp->ctx && xs_queue_full (&xp->ctx->acceptqueue))) {
         xp = (struct xs_pollfd*)calloc (1, sizeof(xs_pollfd));
         if (xp) {
             xs_pollfd_Init (xp, root, pfdTotal);
@@ -691,7 +765,7 @@ int xs_pollfd_Sleep(xs_pollfd* xp) {
 
 char xs_pollfd_Processing(xs_pollfd* xp) {
     if (xp==0) return 0;
-    return (xp->pfdCount>xp->listenCount || (/*xp->root==xp &&*/ xp->listenCount) || xp->sockCount || (xp->ctx && xp->ctx->acceptqueue.qDepth));
+    return (xp->pfdCount>xp->listenCount || (/*xp->root==xp &&*/ xp->listenCount) || xp->sockCount || (xp->ctx && xp->ctx->acceptqueue.qDepth && xp->pfdCount<xp->pfdTotal));
 }
 
 

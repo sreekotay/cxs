@@ -23,7 +23,7 @@ const char*     xs_SSL_error            (SSL* ssl);
 
 //context
 SSL_CTX*        xs_SSL_newCTX_server    ();
-int             xs_SSL_set_certs        (SSL_CTX* s, char* privateKeyPem, char* certPem, char* certChainPem); //needs to be set for server CTX to work
+int             xs_SSL_set_certs        (SSL_CTX* s, const char* privateKeyPem, const char* certPem, const char* certChainPem); //needs to be set for server CTX to work
 SSL_CTX*        xs_SSL_newCTX_client    ();
 void            xs_SSL_freeCTX          (SSL_CTX* sslctx);
 
@@ -340,7 +340,7 @@ void xs_SSL_locking_callback(int mode, int mutex_num, const char *file, int line
 
 unsigned long xs_SSL_id_callback(void)      {return (unsigned long) pthread_self();}
 
-int xs_SSL_set_certs(SSL_CTX* sslctx, char* privateKeyPem, char* certPem, char* certChainPem) {
+int xs_SSL_set_certs(SSL_CTX* sslctx, const char* privateKeyPem, const char* certPem, const char* certChainPem) {
     int ret=0;
     if (sslctx==0) return -1;
     if (certPem &&          SSL_CTX_use_certificate_file        (sslctx, certPem,       1) == 0) ret = -2;

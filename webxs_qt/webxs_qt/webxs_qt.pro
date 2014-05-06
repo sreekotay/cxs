@@ -6,7 +6,6 @@ LIBS += -ldl -lpthread
 
 SOURCES += \
     ../../webxs.c \
-    ../../xs/miniz_115.c \
     ../../xs/miniz_116.c
 
 HEADERS += \

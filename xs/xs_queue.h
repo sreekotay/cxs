@@ -43,6 +43,7 @@ struct xs_queue {
 void    xs_queue_create             (xs_queue* q, int elemSize, int queueSize, xs_queue_proc qProc, void* qProcData);
 void    xs_queue_destroy            (xs_queue* q);
 int     xs_queue_size               (xs_queue* q);
+int     xs_queue_full               (xs_queue* q);
 void    xs_queue_add                (xs_queue* q, void* data);
 int     xs_queue_push               (xs_queue* q, void* data, char blocking);
 int     xs_queue_pop                (xs_queue* q, void* data, char blocking);
@@ -175,6 +176,9 @@ void xs_queue_launchwatchdog (xs_queue* qs, time_t mytimeout) {
 int xs_queue_size(xs_queue* qs) {
     return qs->qDepth;
 }
+int xs_queue_full(xs_queue* qs) {
+    return qs->qDepth+1>=qs->qSpace;
+}
 
 int xs_queue_grow(xs_queue* qs, int space) {
     void* data;
@@ -205,6 +209,11 @@ int xs_queue_push(xs_queue* qs, void* data, char blocking) {
     xs_atomic_inc (qs->qReadLock);
     xs_atomic_dec (qs->qWriteLock);
 #endif
+    while (qs->qDepth+1>=qs->qSpace) {
+        if (blocking==0) return 1; //busy
+        sched_yield();
+        if (qs->qDepth>=qs->qSpace) sleep(0);
+    }
     do {
         wi  = qs->qWriteInd;
         ri  = qs->qReadInd; 

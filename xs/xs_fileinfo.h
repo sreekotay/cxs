@@ -43,6 +43,8 @@ int     xs_fileinfo_loaddata    (xs_fileinfo*  fi,  const char *path);
 
 #define _use_MMAP_      1
 
+#include "khash.h"
+
 #ifdef WIN32
 #else
 #include <sys/stat.h>
@@ -123,31 +125,12 @@ int xs_fileinfo_init() {
 }
 
 void xs_fileinfo_global_lockstatus(int oldstatus, int newstatus) {
-#if 0
-    if (newstatus==1 && oldstatus==0)       pthread_mutex_lock(&gxs_statmutex);
-    else if(newstatus==0 && oldstatus==1)   pthread_mutex_unlock(&gxs_statmutex);
-#elif 0
-    if (newstatus==2) {
-        while (xs_atomic_swap (gxs_statwrite, 0, 1)!=0) {sched_yield(); printf ("yield file lock\n");}
-        while (gxs_statread)              {sched_yield(); printf ("yield file read\n");}
-        return;
-    }
-    if (oldstatus==2) {
-        //pthread_mutex_unlock(&gxs_statmutex);
-        gxs_statwrite = 0;
-        return;
-    }
-
-    if (oldstatus==1 && newstatus==0)       xs_atomic_add (gxs_statread, -1);
-    while (gxs_statwrite)              {sched_yield(); printf ("yield file\n");}
-    if (oldstatus==0 && newstatus==1)       xs_atomic_add (gxs_statread, 1);
-#elif 1
-    if (newstatus==2) {
+   if (newstatus==2) {
         xs_atomic_spin (xs_atomic_swap(gxs_statwrite,0,1)!=0);
         //xs_atomic_inc (gxs_statwrite);
         if (oldstatus==1) xs_atomic_dec (gxs_statread);
         xs_atomic_spin_do(gxs_statread, {});//printf ("yield hash\n"));
-       return;
+        return;
     }
     if (oldstatus==2) {
         xs_atomic_dec (gxs_statwrite);
@@ -166,28 +149,6 @@ void xs_fileinfo_global_lockstatus(int oldstatus, int newstatus) {
         //xs_atomic_dec (gxs_statwrite);
         return;
     }
-#elif 0
-    if (newstatus==2) {
-        if (oldstatus==1) pthread_rwlock_rdunlock(&gxs_stat_rwlock);
-        pthread_rwlock_wrlock(&gxs_stat_rwlock);
-        return;
-    }
-    if (oldstatus==2) {
-        pthread_rwlock_wrunlock(&gxs_stat_rwlock);
-        if (newstatus==1) pthread_rwlock_rdlock(&gxs_stat_rwlock);
-        return;
-    }
-    if (oldstatus==1) {
-        pthread_rwlock_rdunlock(&gxs_stat_rwlock);
-        return;
-    }
-    if (oldstatus==0) {
-        pthread_rwlock_rdlock(&gxs_stat_rwlock);
-        return;
-    }
-#else
-    while (xs_atomic_swap (gxs_statwrite, oldstatus, newstatus)!=oldstatus) {sched_yield(); /*printf ("yield hash\n");*/}
-#endif
 }
 
 void xs_fileinfo_lock(xs_fileinfo* fi) {

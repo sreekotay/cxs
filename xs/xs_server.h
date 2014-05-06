@@ -12,13 +12,15 @@ typedef struct xs_server_ctx        xs_server_ctx;
 // function declarations
 // =================================================================================================================
 xs_server_ctx*          xs_server_create            (const char* rel_path, const char* root_path);
-int                     xs_server_listen            (xs_server_ctx* ctx, xs_conn* conn);
-int                     xs_server_active            (xs_server_ctx* ctx);
+int                     xs_server_listen            (xs_server_ctx* ctx, int port);
+int                     xs_server_listen_ssl        (xs_server_ctx* ctx, int port, const char* privateKeyPem, const char* certPem, const char* certChainPem);
+int                     xs_server_active            (xs_server_ctx* ctx);       //returns >0 if active
 xs_server_ctx*          xs_server_stop              (xs_server_ctx* ctx);
 xs_server_ctx*          xs_server_destroy           (xs_server_ctx* ctx);
 
-int                     xs_server_init_all          (); 
-int                     xs_server_terminate_all     (int signal, void *dummy); //callback for signalling
+int                     xs_server_init_all          (int startupstuff);         //setup signal handers, etc
+int                     xs_server_stop_all          (int signal, void *dummy);  //callback for signalling -- (0, 0) is fine
+int                     xs_server_terminate_all     ();
 
 
 #endif //header
@@ -36,8 +38,14 @@ int                     xs_server_terminate_all     (int signal, void *dummy); /
 #ifndef _xs_SERVER_IMPL_
 #define _xs_SERVER_IMPL_
 
+#undef _xs_IMPLEMENTATION_
+#include <assert.h>
+#include "xs_startup.h"
 #include "xs_arr.h"
 #include "xs_queue.h"
+#include "xs_fileinfo.h"
+#include "xs_ssl.h"
+#define _xs_IMPLEMENTATION_
 
 struct xs_server_ctx {
     char server_name[PATH_MAX];
@@ -268,7 +276,7 @@ static const struct {
     {".m3u",        4, "audio/x-mpegurl"},
     {".ogg",        4, "audio/ogg"},
     {".ram",        4, "audio/x-pn-realaudio"},
-    {".xml",        4, "text/xml"},
+    {".xml",        4, "application/xml"},
     {".json",       5, "text/json"},
     {".xslt",       5, "application/xml"},
     {".xsl",        4, "application/xml"},
@@ -459,6 +467,12 @@ static char xs_http_notmodified(const xs_httpreq *req, const xs_fileinfo *fd) {
     h = xs_http_getheader(req, "If-Modified-Since");
     return 0;
 }
+
+#ifdef WIN32
+#define INT64_FMT		"I64d"
+#else
+#define INT64_FMT		"lld"
+#endif
 
 size_t xs_http_fileresponse(xs_server_ctx* ctx, xs_conn* conn, const char* path, int dobody) {
     const xs_httpreq* req = xs_conn_getreq(conn);
@@ -672,26 +686,71 @@ static int websocket_data_handler(xs_conn *conn, char *data, size_t datalen) {
    return memcmp(data, "exit", 4);
 }
 
-xs_atomic gcc=0, cbcc=0;
+xs_atomic gcc=0, cbcc=0, ecc=0, ncc=0;
+#define msghdr  msghdrxs
+#define msg     msgxs
+char msghdr[] = 
+			"HTTP/1.1 200 OK\r\n"
+			"Content-Length: 100\r\n"
+			"Connection: keep-alive\r\n"
+	//		"Accept-Ranges: bytes\r\n"
+	//		"Server: webxs\r\n"
+	//		"Date: today\r\n"
+	//		"Etag: \"bytes\"\r\n"
+            "Content-Type: text/plain\r\n\r\n";
+char msg[] =
+			"100xxxxxxx"
+			"xxxxxxxxxx"
+			"xxxxxxxxxx"
+			"xxxxxxxxxx"
+			"xxxxxxxxxx"
+			"xxxxxxxxxx"
+			"xxxxxxxxxx"
+			"xxxxxxxxxx"
+			"xxxxxxxxxx"
+			"xxxxxxxxx0"
+				;
 int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
     xs_server_ctx* ctx = (xs_server_ctx*)xs_async_getuserdata (xas);
     char buf[1024];
-    int n, s, err=0, sock=0, rr, lcount=0;
+    int n, s, err=0, sock=0, rr=1, lcount=0;
     xs_atomic rcount = xs_conn_rcount(conn);
     const char* h;
+
+//    if (message==exs_Conn_Error || message==exs_Conn_Close) 
+    if (message==exs_Conn_New) (long)xs_atomic_inc(ncc);
+    //    xs_logger_info ("new %d %ld err:%d", message, (long)xs_atomic_inc(ncc), xs_conn_error(conn));
     switch (message) {
         case exs_Conn_New:
             break;
         case exs_Conn_Read:
+            if (0) {
+            do {
+                n=xs_conn_httpread (conn, buf, sizeof(buf)-1, &rr);
+                            if (0 && n>0) {buf[n]=0; printf ("%s", buf);}
+                            if (n>=0) buf[n]=0; else buf[0]=0;
+                            s=xs_conn_state (conn);
+                            if (n>0 || s==exs_Conn_Complete || strstr(buf, "\r\n\r\n")) {//n>0 || s==exs_Conn_Complete)// || strstr(buf, "\r\n\r\n"))
+                                if (xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
+                                xs_conn_write_header (conn, msghdr, sizeof(msghdr)-1);
+                                if (xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
+                                xs_conn_write (conn, msg, sizeof(msg)-1);
+                                if (sock) xs_sock_setnonblocking(sock, 1);
+                            }
+            } while (rr && xs_conn_error(conn)==0);
+                                        return xs_conn_error(conn) ? exs_Conn_Close : 0;
+            }        
+
             xs_atomic_inc (cbcc);
-            while (err==0 && ((n=xs_conn_httpread(conn, buf, sizeof(buf)-1, &rr))>0 || rr)) {
+            while (err==0 && rr) {
+                n=xs_conn_httpread(conn, buf, sizeof(buf)-1, &rr);
                 lcount++;
                 if ((s=xs_conn_state (conn))==exs_Conn_Complete || n>0) {// || s==exs_Conn_Websocket) {//n>0) {
                     const xs_httpreq* req =xs_conn_getreq(conn);
                     xs_atomic_inc (gcc);
                     h = xs_http_get(req, exs_Req_Method);
-                    if (!strcmp(h, "GET") || !strcmp(h, "HEAD")) {
-                        if ((s=xs_http_getint(req, exs_Req_Upgrade))) {
+                    if (h && (!strcmp(h, "GET") || !strcmp(h, "HEAD"))) {
+                        if (req && (s=xs_http_getint(req, exs_Req_Upgrade))) {
                             if (s==1) {
                                 if (1) {//xs_websocket_response (ctx, conn)==0) {
                                     websocket_ready_handler(conn);
@@ -710,7 +769,7 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
 
                             //xs_conn_write_header (conn, msghdr, sizeof(msghdr)-1);
                             //xs_conn_write (conn, msg, sizeof(msg)-1);
-                            result = xs_http_fileresponse (ctx, conn, path,*h=='G'); //GET vs HEAD
+                            result = xs_http_fileresponse (ctx, conn, path, h? *h=='G' : 1); //GET vs HEAD
                             if (1)
                                 xs_logger_debug ("%s - - \"%s %s HTTP/%s\" %d %zd", 
                                             //xs_sock_addrtostr (ipaddr, sizeof(ipaddr), xs_conn_getsockaddr(conn)),//"ADDR", 
@@ -719,7 +778,7 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
                                             xs_http_get (req, exs_Req_URI),
                                             xs_http_get (req, exs_Req_Version),
                                             xs_http_getint (req, exs_Req_Status), result);
-                        } else if (0) {
+                        } else if (1) {
                             if (xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
                             xs_conn_write_header (conn, msghdr, sizeof(msghdr)-1);
                             if (xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
@@ -741,7 +800,7 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
                         if (xs_http_getint(req, exs_Req_KeepAlive)==0) {
                             err = exs_Conn_Close;
                         }
-                    } else xs_logger_error ("HTTP method '%s' not handled %s", xs_http_get (req, exs_Req_Method), xs_conn_getsockaddrstr (conn));
+                    } else xs_logger_error ("HTTP method '%s' not handled %s", h ? h : "UNSPECIFIED", xs_conn_getsockaddrstr (conn));
                 } else { 
                     if (s==exs_Conn_Error) err = xs_conn_error(conn);
                     //else printf ("%ld something other state %d\n", gcc, s);
@@ -749,18 +808,19 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
                         case exs_Error_HeaderTooLarge:  xs_conn_write_httperror (conn, 414, "Header Too Large", "Max Header Sizer Exceeded");   break;
                         case exs_Error_InvalidRequest:  xs_conn_write_httperror (conn, 501, "Not Supported", "Invalid Request");                break;
                     }
-                    if (n<=0) break;
+                    if (n<0) break;
                 }
+                if (err==0) err = xs_conn_error(conn) ? exs_Conn_Close : 0;
             }
-            if (n<0) err=xs_conn_error(conn);
-            if (n!=0 && err==0) break;
-            err=err;
+            if (err==0) break;
 
             //fallthrough...
             if (err && err!=exs_Conn_Close) xs_logger_error ("closing connections from %s %d", xs_conn_getsockaddrstr (conn), err);
 
         case exs_Conn_Error:
         case exs_Conn_Close:
+         //   xs_printf ("msg %d %ld--%ld err:%d\n", message, ncc, (long)xs_atomic_inc(ecc)+1, xs_conn_error(conn));
+            (long)xs_atomic_inc(ecc);
             xs_conn_dec(conn);
             err = exs_Conn_Close;
             break;
@@ -774,11 +834,11 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
 // ==================================================
 xs_server_ctx* xs_server_create(const char* rel_path, const char* root_path) {
     xs_server_ctx* ctx = calloc(sizeof(xs_server_ctx), 1);
-    struct xs_async_connect* xas=xs_async_create(32);
+    struct xs_async_connect* xas=xs_async_create(8);
     xs_strlcpy(ctx->server_name, xs_server_name(), sizeof(ctx->server_name));
     xs_path_setabsolute (ctx->document_root, sizeof(ctx->document_root), rel_path, root_path);
-    xs_queue_create (&ctx->writeq, sizeof(writeq_data), 1024*10, (xs_queue_proc)writeq_proc, NULL);
-    xs_queue_launchthreads (&ctx->writeq, 2, 0);
+    //xs_queue_create (&ctx->writeq, sizeof(writeq_data), 1024*10, (xs_queue_proc)writeq_proc, NULL);
+    //xs_queue_launchthreads (&ctx->writeq, 2, 0);
     xs_async_setuserdata(xas, ctx);
     ctx->xas = xas;
 
@@ -792,10 +852,45 @@ xs_async_connect* xs_server_xas (xs_server_ctx* ctx) {
     return ctx ? ctx->xas : 0;
 }
 
-int xs_server_listen (xs_server_ctx* ctx, xs_conn* conn) {
+int xs_server_listen (xs_server_ctx* ctx, int port) {
+    int err;
+    xs_conn *conn4=0, *conn6=0;
     if (ctx==0) return -50;
-    ctx->xas = xs_async_listen (ctx->xas, conn, xs_server_cb);
-    return (ctx->xas)!=0;
+#ifdef USE_IPV6
+ 	err = xs_conn_listen(&conn6, port, 0, 1);   //v6 socket (done 
+    if (err) xs_logger_error ("listen v6 [%d]: %d se:%d", port, err, xs_sock_err());
+    ctx->xas = xs_async_listen (ctx->xas, conn6, xs_server_cb);
+
+#endif
+#if (!defined USE_IPV6) || defined WIN32
+    err = xs_conn_listen(&conn4, port, 0, 0);   //v4 socket (redundant on linux)
+	if (err) xs_logger_error ("listen v4 [%d]: %d se:%d", port, err, xs_sock_err());
+    ctx->xas = xs_async_listen (ctx->xas, conn4, xs_server_cb);
+#endif
+    return conn4 || conn6;
+}
+
+int xs_server_listen_ssl (xs_server_ctx* ctx, int port, const char* privateKeyPem, const char* certPem, const char* certChainPem) {
+    int err;
+    xs_conn *conn4=0, *conn6=0;
+    if (ctx==0) return -50;
+#ifdef USE_IPV6
+ 	err = xs_conn_listen(&conn6, port, 1, 1);   //v6 socket (done 
+    if (err) xs_logger_error ("listen v6 [%d]: %d se:%d", port, err, xs_sock_err());
+    if (conn6) err = xs_SSL_set_certs(xs_conn_sslctx(conn6), privateKeyPem, certPem, certChainPem);
+
+	if (err) xs_logger_error ("SSL init error [%d]: %d se:%d", port, err, xs_sock_err());
+    else     ctx->xas = xs_async_listen (ctx->xas, conn6, xs_server_cb);
+#endif
+#if (!defined USE_IPV6) || defined WIN32
+    err = xs_conn_listen(&conn4, port, 1, 0);   //v4 socket (redundant on linux)
+	if (err) xs_logger_error ("listen v4 [%d]: %d se:%d", port, err, xs_sock_err());
+    if (conn4) err = xs_SSL_set_certs(xs_conn_sslctx(conn4), privateKeyPem, certPem, certChainPem);
+
+	if (err) xs_logger_error ("SSL init error [%d]: %d se:%d", port, err, xs_sock_err());
+    else     ctx->xas = xs_async_listen (ctx->xas, conn4, xs_server_cb);
+#endif
+    return conn4 || conn6;
 }
 
 int xs_server_active(xs_server_ctx* ctx) {
@@ -824,13 +919,29 @@ xs_server_ctx* xs_server_destroy (xs_server_ctx* ctx) {
     return 0;
 }
 
-int xs_server_init_all() {
+int xs_server_init_all(int startupstuff) {
+    xs_logger_init();
+    if (startupstuff) xs_startup(exs_Start_All, xs_server_stop_all, 0);
     xs_fileinfo_init();
 	xs_SSL_initialize ();	
     return 0;
 }
 
-int xs_server_terminate_all(int signal, void *dummy) {
+int xs_server_stop_all(int signal, void *dummy) {
+    int i;
+    xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
+    for (i=xs_arr_count (gserverlist)-1; i>=0; i--) {
+        xs_server_ctx* ctx = xs_arr(xs_server_ctx*, gserverlist, i);
+        xs_atomic_spin (xs_atomic_swap(gserverlistlock,1,0)!=0);
+        xs_server_stop (ctx);
+        xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
+    }
+    xs_atomic_spin (xs_atomic_swap(gserverlistlock,1,0)!=0);
+    return 0;
+}
+
+
+int xs_server_terminate_all() {
     int i;
     xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
     for (i=xs_arr_count (gserverlist)-1; i>=0; i--) {
@@ -844,6 +955,18 @@ int xs_server_terminate_all(int signal, void *dummy) {
 }
 
 
+//required implementations
+#include "xs_socket.h"
+#include "xs_connection.h"
+#include "xs_ssl.h"
+#include "xs_queue.h"
+#include "xs_crc.h"
+#include "xs_sha1.h"
+#include "xs_compress.h"
+#include "xs_logger.h"
+#include "xs_fileinfo.h"
+#include "xs_server.h"
+#include "xs_startup.h"
 
 #endif //_xs_SERVER_IMPL_
 #endif //_xs_IMPLEMENTATION_    

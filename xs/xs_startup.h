@@ -31,6 +31,7 @@ void	xs_startup			(int flags, xs_signal_cb proc, void* userdata);
 #ifndef _xs_STARTUP_IMPL_
 #define _xs_STARTUP_IMPL_
 
+#include <signal.h>
 
 #ifndef WIN32
 #define __cdecl
@@ -48,7 +49,7 @@ static void __cdecl xs_signal_handler(int sig_num) {
 }
 static void __cdecl xs_terminate_handler(void) {
     xs_logger_fatal ("TERMINATE");
-    signal_handler (-3);
+    xs_signal_handler (-3);
     abort();
     xs_logger_flush();
 }
@@ -112,6 +113,10 @@ static void xs_register_crash_handler(void) {
 
 
 void xs_startup(int flags, xs_signal_cb proc, void* data) {
+#ifdef WIN32
+	WSADATA wsdata;
+	WSAStartup(MAKEWORD(2,2), &wsdata);
+#endif    
     gsig_cb = proc;
 	gsig_data = data;
     xs_logger_init();

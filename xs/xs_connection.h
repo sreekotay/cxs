@@ -150,6 +150,7 @@ xs_async_connect*   xs_async_listen         (xs_async_connect*, xs_conn*, xs_asy
 xs_async_connect*   xs_async_destroy        (xs_async_connect* );
 void                xs_async_stop           (xs_async_connect* );
 int                 xs_async_active         (xs_async_connect* );
+int                 xs_async_print          (xs_async_connect* );
 
 //helper functions
 void                xs_async_setuserdata    (xs_async_connect*, void* );
@@ -166,7 +167,8 @@ void*               xs_async_getuserdata    (xs_async_connect*);
 #define MSG_MORE        MSG_PARTIAL
 #endif //MSG_MORE
 
-
+//internal --- yuck
+int          xs_conn_cachepurge (xs_conn* conn); //forward declaration
 
 
 
@@ -228,7 +230,7 @@ struct xs_conn {
 
 struct xs_httpreq {
     unsigned int        statuscode, chunked:1, keepalive:1, upgrade:4, opcode:4, done:2;
-    int                 reqlen;
+    int                 reqlen, reqmallocsize;
     char                datamask[4];
     time_t              createtime;
     size_t              contentlen;
@@ -482,7 +484,7 @@ int xs_http_getint (const xs_httpreq* req, int attr) {
         case exs_Req_Upgrade:       return req->upgrade;
         case exs_Req_Opcode:        return req->opcode;
     }
-    return -1;
+    return 0;
 }
 
 int xs_http_setint (xs_httpreq* req, int attr, int val) {
@@ -510,7 +512,7 @@ int xs_conn_bufresize(xs_conn* conn) {
     if (conn->buf==0) {
         conn->buf = (char*)malloc (1024);
         conn->bufsize = 1024;
-    } else  if (conn->consumed==conn->datalen) {
+    } else  if (conn->consumed>=conn->datalen) {
         conn->datalen = 0;
         conn->consumed = 0;
     } else if (conn->consumed>(conn->bufsize>>2)*3) {
@@ -546,7 +548,7 @@ size_t xs_conn_write_httperror (xs_conn* conn, int statuscode, const char* descr
         "Server:%s\r\n"
         "Date: %s\r\n",
         ver ? ver : "1.0", statuscode, description, result, 
-        xs_http_getint(xs_conn_getreq(conn), exs_Req_KeepAlive) ? "keep-alive" : "close",
+        (ver&&xs_http_getint(xs_conn_getreq(conn), exs_Req_KeepAlive)) ? "keep-alive" : "close",
         xs_server_name(), xs_timestr_now());
     //if (wt&&xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
     xs_conn_header_done(conn, body && *body);
@@ -840,7 +842,11 @@ static int xs_http_parseheaders (xs_httpreq* req, char* buf, int rlen) {
 static int xs_http_parse(xs_httpreq* req, const char* buf, int rlen) {
     char *b, *ch;
     int c = xs_http_skipspace(buf, rlen, 0), ulen;
-    memset (req, 0, sizeof(*req));
+    //memset (req, 0, sizeof(*req));
+    req->consumed = req->contentlen = 0;
+    req->numheaders = req->opcode = req->done = req->statuscode = 0;
+    req->chunked = req->upgrade = req->keepalive = 0;
+    req->next = 0;
     if (c>=rlen) return -50;
     
     //copy buffer
@@ -855,6 +861,7 @@ static int xs_http_parse(xs_httpreq* req, const char* buf, int rlen) {
     req->method = b+c;      c = xs_http_skiptokenandspace(b, rlen, c);
     req->uri = b+c;         c = xs_http_skiptokenandspace(b, rlen, c);
     req->version = b+c;     c = xs_http_skiptoEOL(b, rlen, c);
+    req->status = req->hash = req->query = 0;
 
     //client request:       GET / HTTP/1.0 
     //request response:     HTTP/1.0 200 OK
@@ -888,6 +895,7 @@ static int xs_http_parse(xs_httpreq* req, const char* buf, int rlen) {
         if (req->query) {ulen=strlen(req->query)+1; xs_uri_decode((char*)req->query, ulen, req->query, ulen, 0);}
     }
 
+
     //skip to EOL of header and parse other headers
     return xs_http_parseheaders (req, b+c+1, rlen-c-1);
 }
@@ -906,7 +914,7 @@ int xs_http_validrequest(const char *buf, int buflen) {
 }
 
 int xs_http_createreq(xs_conn *conn, int rlen) { //rlen may be zero
-    int err=0;
+    int err=0, reqmallocsize;
     char datamask[4]={0};
     size_t contentlen=0;
     xs_httpreq* req     = conn->freereq;
@@ -919,8 +927,10 @@ int xs_http_createreq(xs_conn *conn, int rlen) { //rlen may be zero
     if (rlen<=0)        {conn->errnum = exs_Error_InvalidRequest; return rlen==0 ? -1 : -50;} //-1 = too big request, otherwise error
 
     //allocate space
-    if (req==0)                     req = (xs_httpreq*)malloc(sizeof(xs_httpreq) + rlen + 1);
-    else if (conn->upgrade==0)      req = (xs_httpreq*)realloc(conn->req, sizeof(xs_httpreq) + rlen + 1); //keep reusing if we're upgraded
+    reqmallocsize                               = sizeof(xs_httpreq) + rlen + 1;
+    if (req==0)                                 {req = (xs_httpreq*)malloc(reqmallocsize);             if (req) req->reqmallocsize = reqmallocsize;}
+    else if (reqmallocsize>req->reqmallocsize)  {req = (xs_httpreq*)realloc(conn->req, reqmallocsize); if (req) req->reqmallocsize = reqmallocsize;}
+    //else if (conn->upgrade==0)                  req = (xs_httpreq*)realloc(conn->req, reqmallocsize); //keep reusing if we're upgraded
     if (req==0)                     {conn->errnum = exs_Error_OutOfMemory; return -108;}
     if (conn->req==0)               {conn->req = req; assert (conn->lastreq==0);}
     else if (conn->lastreq)         conn->lastreq->next = req;
@@ -939,10 +949,11 @@ int xs_http_createreq(xs_conn *conn, int rlen) { //rlen may be zero
 }
 
 int xs_conn_headerready(xs_conn *conn) {
-    int rlen, n=-1;
+    int rlen=0, n=-1;
     int maxheaderlen = (1<<17);
 
     xs_conn_bufresize(conn);
+    if (conn->datalen)
     rlen = (conn->upgrade==0) ? xs_http_validrequest    (conn->buf, conn->datalen) :
                                 xs_websocket_framevalid (conn->buf, conn->datalen, 0, 0);
     if (rlen<0)                 conn->errnum = exs_Error_InvalidRequest;
@@ -1048,8 +1059,9 @@ size_t xs_conn_read (xs_conn* conn, void* buf, size_t len, int* reread) {
     if (conn->ssl)  n = xs_SSL_read (conn->ssl, buf, (int)len);
     else            n = recv (conn->sock, (char*)buf, (int)len, 0);
     if (n<0)        xs_conn_seterr(conn);
+    else if (n==0)  conn->errnum = exs_Conn_Close;//-100001;
     else            conn->errnum = 0;
-    if (reread)     *reread = (n>0);
+    if (reread)     *reread = (n==len) && (conn->errnum==0);
     if (n>0 && conn->proto==0)  {//check only the first time
         if (conn->ssl) xs_SSL_protocol (conn->ssl, conn->sslproto, sizeof(conn->sslproto));
         conn->proto = 1;
@@ -1091,8 +1103,9 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
         if (req && conn->req==req)  {req->next = conn->freereq; conn->freereq = req; conn->req = 0;  conn->lastreq = 0;} //$$$SREE NOT RIGHT!!!!
         else if (req)               {assert(0);}
         err = xs_http_createreq(conn, n);
-        if (err) return err;
+        if (err) return err;//<---- wrong SREE - fixme
         req = conn->req; assert(req);
+        //conn->datalen=0; if (req) req->reqlen = 0;return n; // for debugging
         if (conn->upgrade) req->upgrade = conn->upgrade; //$$$SREE -- we want to mark it as special -- not sure this is the right semantic
 
         if (req->upgrade==1) { 
@@ -1103,14 +1116,14 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
                 return -10; 
             }
             if (reread) *reread=1;
-            return -1;  //finished with header
+            return 0;  //finished with header
         } else if (req->contentlen==0 && req->chunked==0) {
             //if its not a reqest and not chunked, and no contentlen, read until socket closes, if there was no content-length
             if (req->method==0 && (h=xs_http_getheader(req, "Content-Length"))==0) {
                 req->contentlen = ~(((size_t)1)<<((sizeof(size_t)<<3)-1)); //large length
             } else {
-                if (reread) *reread=1;
-                return -1; //this is a zero length request -- no body
+                if (reread) *reread=(conn->datalen>conn->consumed);
+                return 0; //this is a zero length request -- no body
             }
         }
     }
@@ -1125,7 +1138,7 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
                 req->chunked = 0;
                 if (reread) *reread=1;
             }
-            return -1;
+            return 0;
         } 
    }
     
@@ -1252,7 +1265,7 @@ size_t xs_conn_write_ (xs_conn* conn, const void* buf, size_t len, int flags) {
         if (n==0)      return 0; //$$SREE normal socket termination
         tot += (n>0 ? n : 0);
         if (n!=amt) {
-            if (xs_conn_cachefill(conn, (char*)buf + tot, len-tot, 1)) tot += len-tot;
+            if (xs_conn_cachefill(conn, (char*)buf + tot, amt, 1)) tot += amt;
             if (n>0 || xs_conn_seterr(conn)==0) conn->errnum = exs_Error_WriteBusy;
             break;
         }
@@ -1434,6 +1447,7 @@ struct xs_async_connect*  xs_async_create(int hintsize) {
 }
 
 int xs_async_active(struct xs_async_connect* xas)                       {return xas&&xas->stop==0;}
+int xs_async_print(struct xs_async_connect* xas)                        {return xs_pollfd_print (xas->xp);}
 void xs_async_setuserdata(struct xs_async_connect* xas, void* usd)      {if (xas) xas->userdata=usd;}
 void* xs_async_getuserdata(struct xs_async_connect* xas)                {return xas ? xas->userdata : 0;}
 void xs_async_stop(struct xs_async_connect* xas)                        {if (xas) xas->stop=-2;}
