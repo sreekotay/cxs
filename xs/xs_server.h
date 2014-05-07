@@ -12,16 +12,20 @@ typedef struct xs_server_ctx        xs_server_ctx;
 // function declarations
 // =================================================================================================================
 xs_server_ctx*          xs_server_create            (const char* rel_path, const char* root_path);
-int                     xs_server_listen            (xs_server_ctx* ctx, int port);
-int                     xs_server_listen_ssl        (xs_server_ctx* ctx, int port, const char* privateKeyPem, const char* certPem, const char* certChainPem);
+int                     xs_server_listen            (xs_server_ctx* ctx, int port, xs_async_callback cb);
+int                     xs_server_listen_ssl        (xs_server_ctx* ctx, int port, xs_async_callback cb, const char* privateKeyPem, const char* certPem, const char* certChainPem);
 int                     xs_server_active            (xs_server_ctx* ctx);       //returns >0 if active
+xs_async_connect*       xs_server_xas               (xs_server_ctx* ctx); 
 xs_server_ctx*          xs_server_stop              (xs_server_ctx* ctx);
 xs_server_ctx*          xs_server_destroy           (xs_server_ctx* ctx);
 
 int                     xs_server_init_all          (int startupstuff);         //setup signal handers, etc
 int                     xs_server_stop_all          (int signal, void *dummy);  //callback for signalling -- (0, 0) is fine
+
 int                     xs_server_terminate_all     ();
 
+
+int                     xs_server_cb                (struct xs_async_connect* xas, int message, xs_conn* conn);
 
 #endif //header
 
@@ -668,7 +672,7 @@ void writeq_proc (xs_queue* qs, writeq_data *wqd, void* privateData) {
 // ==================================================
 //  core server code
 // ==================================================
-static void websocket_ready_handler(xs_conn *conn) {
+static void websocket_ready_handler_(xs_conn *conn) {
     static const char *message = "server ready";
     xs_conn_write_websocket(conn, exs_WS_TEXT, message, strlen(message), 0);
 }
@@ -677,7 +681,7 @@ static void websocket_ready_handler(xs_conn *conn) {
 //   flags: first byte of websocket frame, see websocket RFC,
 //          http://tools.ietf.org/html/rfc6455, section 5.2
 //   data, datalen: payload data. Mask, if any, is already applied.
-static int websocket_data_handler(xs_conn *conn, char *data, size_t datalen) {
+static int websocket_data_handler_(xs_conn *conn, char *data, size_t datalen) {
     xs_conn_write_websocket(conn, exs_WS_TEXT, data, datalen, 0);
     //xs_conn_write_websocket (conn, exs_WS_CONNECTION_CLOSE, 0, 0, 0);
 
@@ -852,25 +856,25 @@ xs_async_connect* xs_server_xas (xs_server_ctx* ctx) {
     return ctx ? ctx->xas : 0;
 }
 
-int xs_server_listen (xs_server_ctx* ctx, int port) {
+int xs_server_listen (xs_server_ctx* ctx, int port, xs_async_callback cb) {
     int err;
     xs_conn *conn4=0, *conn6=0;
     if (ctx==0) return -50;
 #ifdef USE_IPV6
  	err = xs_conn_listen(&conn6, port, 0, 1);   //v6 socket (done 
     if (err) xs_logger_error ("listen v6 [%d]: %d se:%d", port, err, xs_sock_err());
-    ctx->xas = xs_async_listen (ctx->xas, conn6, xs_server_cb);
+    ctx->xas = xs_async_listen (ctx->xas, conn6, cb);
 
 #endif
 #if (!defined USE_IPV6) || defined WIN32
     err = xs_conn_listen(&conn4, port, 0, 0);   //v4 socket (redundant on linux)
 	if (err) xs_logger_error ("listen v4 [%d]: %d se:%d", port, err, xs_sock_err());
-    ctx->xas = xs_async_listen (ctx->xas, conn4, xs_server_cb);
+    ctx->xas = xs_async_listen (ctx->xas, conn4, cb);
 #endif
     return conn4 || conn6;
 }
 
-int xs_server_listen_ssl (xs_server_ctx* ctx, int port, const char* privateKeyPem, const char* certPem, const char* certChainPem) {
+int xs_server_listen_ssl (xs_server_ctx* ctx, int port, xs_async_callback cb, const char* privateKeyPem, const char* certPem, const char* certChainPem) {
     int err;
     xs_conn *conn4=0, *conn6=0;
     if (ctx==0) return -50;
@@ -880,7 +884,7 @@ int xs_server_listen_ssl (xs_server_ctx* ctx, int port, const char* privateKeyPe
     if (conn6) err = xs_SSL_set_certs(xs_conn_sslctx(conn6), privateKeyPem, certPem, certChainPem);
 
 	if (err) xs_logger_error ("SSL init error [%d]: %d se:%d", port, err, xs_sock_err());
-    else     ctx->xas = xs_async_listen (ctx->xas, conn6, xs_server_cb);
+    else     ctx->xas = xs_async_listen (ctx->xas, conn6, cb);
 #endif
 #if (!defined USE_IPV6) || defined WIN32
     err = xs_conn_listen(&conn4, port, 1, 0);   //v4 socket (redundant on linux)
@@ -888,7 +892,7 @@ int xs_server_listen_ssl (xs_server_ctx* ctx, int port, const char* privateKeyPe
     if (conn4) err = xs_SSL_set_certs(xs_conn_sslctx(conn4), privateKeyPem, certPem, certChainPem);
 
 	if (err) xs_logger_error ("SSL init error [%d]: %d se:%d", port, err, xs_sock_err());
-    else     ctx->xas = xs_async_listen (ctx->xas, conn4, xs_server_cb);
+    else     ctx->xas = xs_async_listen (ctx->xas, conn4, cb);
 #endif
     return conn4 || conn6;
 }

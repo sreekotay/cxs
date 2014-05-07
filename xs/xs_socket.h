@@ -479,19 +479,10 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         else rret = 0;
     #else
         rret = poll(xp->pfd, xp->pfdCount, (rret>0)||(qp->qDepth&&(!xs_queue_full(qp))&&xp->pfdCount<xp->pfdTotal) ? 0 : 20 + xp->xpi*10);//(/*xp==xp->root*/xp->xpi<4 ? 20 : 200));
-        /*
-        do {
-            rret = poll(xp->pfd, xp->pfdCount, rret>0 ? 0 : (xp->root==xp?20:200));//ret>0 (rret>0) ? 0 : 20 + xp->xpi*10);//(xp->xpi<4 ? 20 : 200));
-            ct = time(NULL);
-        } while (rret==0 && pt==ct);
-        pt = ct;
-        */
-         if (0) {//xp->pfdCount>xp->listenCount && 1) {
+        if (0) {//xp->pfdCount>xp->listenCount && 1) { //for debugging
             static time_t ct = 0, pt = 0;
             ct = time(0);
             if (ct+1>pt)
-                // (xp->pfdCount>xp->listenCount || (/*xp->root==xp &&*/ xp->listenCount) || xp->sockCount || (xp->ctx && xp->ctx->acceptqueue.qDepth && xp->pfdCount<xp->pfdTotal));
-
                 printf ("rret[%d] = pfd[%d] listen[%d] sockc[%d] queueDepth[%d] xp[0x%lx][%d] tc[%d]\n", rret, 
                 xp->pfdCount, (int)xp->listenCount, (int)xp->sockCount, (int)xp->ctx->acceptqueue.qDepth,
                 (unsigned long)xp, (int)xp->xpi, (int)xp->ctx->threadcount);
@@ -522,7 +513,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
             for (i=0, ip=0; i<xp->pfdCount; i++) {
         #endif
                 int sock = xp->pfd[i].fd;
-                assert (xp->sidmap[xp->pss[i].sid]==i);
+                assert (xp->sidmap[xp->pss[i].sid]==0 || xp->sidmap[xp->pss[i].sid]==i);
                 if (xs_sock_invalid(xp->pfd[i].fd) || xp->pfd[i].revents&(POLLERR|POLLHUP|POLLNVAL)) {
                     // ==========================
                     // error case
@@ -531,7 +522,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
                     if (i<xp->listenCount) {
                         //error with core socket
                         if (xs_sock_valid(xp->pfd[i].fd)) closesocket(xp->pfd[i].fd);
-                        xp->pfd[i].fd  = 0;//INVALID_SOCKET; //already cleaned up
+                        xp->pfd[i].fd  = 0;//INVALID_SOCKET? //already cleaned up
                         xp->pss[i].cfd = 0; 
                         xp->listenCount--;
                     }
@@ -555,7 +546,6 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
                     socklen_t addrlen=sizeof(xp->pss[i].sa), on=1;
                     qs.s = (xp->running>0) ? accept(xp->pfd[i].fd, (struct sockaddr*)&xp->pss[i].sa.saddr_in, &addrlen) : 0;
                     if (qs.s>0) {
-                        //printf ("poll_ish\n");
                         /*
                         struct linger linger;
                         linger.l_onoff = 1;

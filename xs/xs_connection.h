@@ -11,11 +11,20 @@
 enum {
     //callback messages
     exs_Conn_Error              = -1,
+    exs_Conn_Handled            = 1,
     exs_Conn_New                = 1000,
     exs_Conn_Read,
     exs_Conn_Write,
     exs_Conn_Close,
     exs_Conn_Idle,
+
+    exs_Conn_HTTPNew,
+    exs_Conn_HTTPRead,
+    exs_Conn_HTTPComplete,
+
+    exs_Conn_WSNew,
+    exs_Conn_WSRead,
+    exs_Conn_WSComplete,
 
     //connection states
     exs_Conn_Pending,
@@ -46,26 +55,27 @@ enum {
     exs_Max_Headers             = 64,
 
     //error codes
-    exs_Error_InvalidRequest    = 20000,
-    exs_Error_HeaderTooLarge    = 20001,
-    exs_Error_OutOfMemory       = 20002,
-    exs_Error_InvalidSocket     = 20003,
-    exs_Error_BindFail          = 20004,
-    exs_Error_WriteBusy         = 20005,
-    exs_Error_BadRedirect       = 20006,
-    exs_Error_NoAutoRedirect    = 20007,
-    exs_Error_WS_BadOpcode      = 20008,
-    exs_Error_WS_BadContinue    = 20009,
-    exs_Error_WS_InvalidSecKey  = 20010,
+    exs_Error_InvalidRequest    = -20000,
+    exs_Error_HeaderTooLarge    = -20001,
+    exs_Error_OutOfMemory       = -20002,
+    exs_Error_InvalidSocket     = -20003,
+    exs_Error_BindFail          = -20004,
+    exs_Error_WriteBusy         = -20005,
+    exs_Error_BadRedirect       = -20006,
+    exs_Error_NoAutoRedirect    = -20007,
+    exs_Error_WS_BadOpcode      = -20008,
+    exs_Error_WS_BadContinue    = -20009,
+    exs_Error_WS_InvalidSecKey  = -20010,
     exs_Error_Last
 };
+
+
 
 // ======================================================================
 //  xs_conn
 // ======================================================================
 typedef struct xs_conn xs_conn;
 typedef struct xs_httpreq xs_httpreq;
-
 
 //manage
 int                 xs_conn_listen          (xs_conn**, int port, int use_ssl, int ipv6);
@@ -121,7 +131,9 @@ int                 xs_http_getint          (const xs_httpreq*, int attr_name);
 int                 xs_http_setint          (      xs_httpreq*, int attr_name, int val);
 const char*         xs_http_getheader       (const xs_httpreq*, const char* header);
 
-//URI utilities
+// ======================
+// URI utilities
+// ======================
 typedef struct xs_uri {
     int port;
     char* protocol;
@@ -144,10 +156,12 @@ const char*         xs_server_name          ();
 typedef struct xs_async_connect xs_async_connect;
 typedef int (xs_async_callback) (struct xs_async_connect* xas, int message, xs_conn* conn);
 
+int                 xs_async_defaulthandler (struct xs_async_connect* xas, int message, xs_conn* conn);
 xs_async_connect*   xs_async_create         (int hintsize);
 xs_async_connect*   xs_async_read           (xs_async_connect*, xs_conn*, xs_async_callback* proc); //xs_async_connect may be null
 xs_async_connect*   xs_async_listen         (xs_async_connect*, xs_conn*, xs_async_callback* proc); //xs_async_connect may be null
 xs_async_connect*   xs_async_destroy        (xs_async_connect* );
+int                 xs_async_call           (xs_async_connect* xas, int message, xs_conn* conn);
 void                xs_async_stop           (xs_async_connect* );
 int                 xs_async_active         (xs_async_connect* );
 int                 xs_async_print          (xs_async_connect* );
@@ -157,9 +171,11 @@ void                xs_async_setuserdata    (xs_async_connect*, void* );
 void*               xs_async_getuserdata    (xs_async_connect*);
 
 
+// =================================================================================================================
+// =================================================================================================================
 #endif //_xs_CONNECT_H_
-// =================================================================================================================
-// =================================================================================================================
+
+
 
 
 //leftover
@@ -167,8 +183,6 @@ void*               xs_async_getuserdata    (xs_async_connect*);
 #define MSG_MORE        MSG_PARTIAL
 #endif //MSG_MORE
 
-//internal --- yuck
-int          xs_conn_cachepurge (xs_conn* conn); //forward declaration
 
 
 
@@ -447,7 +461,7 @@ int xs_conn_seterr (xs_conn* conn) {
 
 int xs_http_state (xs_httpreq *req) {
     if (req==0 || req->reqlen==0)                       return exs_Conn_Pending;
-    if (req && req->contentlen && req->chunked==0 &&
+    if (req->contentlen && req->chunked==0 &&
         req->consumed == req->contentlen)               return exs_Conn_Complete;
     if (req->contentlen || req->chunked)                return exs_Conn_Response;
     if (req->statuscode>=300 && req->statuscode<=303)   return exs_Conn_Redirect;
@@ -496,6 +510,15 @@ int xs_http_setint (xs_httpreq* req, int attr, int val) {
         default:                    return -1;
     }
     return 0;
+}
+
+void xs_req_clear(xs_httpreq* req) {
+    if (req==0) return;
+    req->consumed = req->contentlen = 0;
+    req->numheaders = req->opcode = req->done = req->statuscode = 0;
+    req->chunked = req->upgrade = req->keepalive = 0;
+    req->version = req->method = req->uri = req->query = req->status = 0;
+    req->next = 0;
 }
 
 const char *xs_http_getheader(const xs_httpreq* req, const char *name) {
@@ -677,7 +700,7 @@ int xs_websocket_frameparse (xs_httpreq* req, char* buf, char datamask[4], size_
     int err=0, opc;
     if (req==0) return -1;
     //memset (req, 0, sizeof(*req));
-    req->consumed = 0;
+    xs_req_clear (req);
     req->contentlen = contentlen;
     memcpy (req->datamask, datamask, 4);
     req->keepalive = (((opc=buf[0]&0x0f))!=exs_WS_CONNECTION_CLOSE);   //keepalive based on close connecion websockets opcode
@@ -843,10 +866,7 @@ static int xs_http_parse(xs_httpreq* req, const char* buf, int rlen) {
     char *b, *ch;
     int c = xs_http_skipspace(buf, rlen, 0), ulen;
     //memset (req, 0, sizeof(*req));
-    req->consumed = req->contentlen = 0;
-    req->numheaders = req->opcode = req->done = req->statuscode = 0;
-    req->chunked = req->upgrade = req->keepalive = 0;
-    req->next = 0;
+    xs_req_clear(req);
     if (c>=rlen) return -50;
     
     //copy buffer
@@ -1103,20 +1123,24 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
         if (req && conn->req==req)  {req->next = conn->freereq; conn->freereq = req; conn->req = 0;  conn->lastreq = 0;} //$$$SREE NOT RIGHT!!!!
         else if (req)               {assert(0);}
         err = xs_http_createreq(conn, n);
-        if (err) return err;//<---- wrong SREE - fixme
+        if (err) {conn->errnum = conn->errnum?conn->errnum:err; return -1;}
         req = conn->req; assert(req);
         //conn->datalen=0; if (req) req->reqlen = 0;return n; // for debugging
         if (conn->upgrade) req->upgrade = conn->upgrade; //$$$SREE -- we want to mark it as special -- not sure this is the right semantic
 
         if (req->upgrade==1) { 
-            //this request is done --- its a client request...
+            //this request is done --- its an upgrade request...
             if ((req->method    && (err=xs_websocket_response(conn))<0) ||   //<0 because >0 just means its not a websocket
                 (req->method==0 && (err=xs_websocket_accept  (conn))<0)) {
                 conn->errnum = exs_Error_WS_InvalidSecKey;
                 return -10; 
             }
-            if (reread) *reread=1;
+            if (reread) *reread=(conn->datalen>conn->consumed);
             return 0;  //finished with header
+        } else if (req->upgrade==2) {
+            if (req->opcode==exs_WS_PING)    xs_conn_write_websocket (conn, exs_WS_PONG, 0, 0, 0);
+            if (req->opcode==exs_WS_PONG)    xs_conn_write_websocket (conn, exs_WS_PING, 0, 0, 0);
+
         } else if (req->contentlen==0 && req->chunked==0) {
             //if its not a reqest and not chunked, and no contentlen, read until socket closes, if there was no content-length
             if (req->method==0 && (h=xs_http_getheader(req, "Content-Length"))==0) {
@@ -1162,7 +1186,7 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
         
         //did we get data?
         if (nread>0) req->consumed += nread;
-    } else if (reread) *reread=1;
+    } else if (reread) *reread=(conn->datalen>conn->consumed);
     
     //done
     if (*(int*)req->datamask!=0) //mask if required
@@ -1485,6 +1509,111 @@ struct xs_async_connect*  xs_async_listen(struct xs_async_connect* xas, xs_conn*
     xs_pollfd_push (xas->xp, xs_conn_getsock(conn), conn, 1); 
     xs_arr_add (xs_conn*, xas->conn_arr, &conn, 1);
     return xas;
+}
+
+int xs_async_call (xs_async_connect* xas, int message, xs_conn* conn){
+    return xas&&conn ? (*conn->cb) (xas, message, conn) : 0;
+}
+
+int xs_async_defaulthandler (struct xs_async_connect* xas, int message, xs_conn* conn) {
+    xs_server_ctx* ctx = (xs_server_ctx*)xs_async_getuserdata (xas);
+    const xs_httpreq* req;
+    const char* h;
+    char buf[1024];
+    int n, s, sp, rr=1, err=0;
+
+    switch (message) {
+        case exs_Conn_New:
+            break;
+
+        case exs_Conn_Read:
+            //web socket handling
+            if (conn->upgrade==2) {
+                err = xs_async_call (xas, exs_Conn_WSRead, conn);   
+                if (err) return err;
+            }
+
+            //normal http connections
+            sp = xs_conn_state (conn);
+            while (err==0 && rr) {
+                n = xs_conn_httpread(conn, buf, sizeof(buf)-1, &rr);
+                s = xs_conn_state (conn);
+                if (err) return err;
+
+                //====================
+                // give callback a shot
+                //====================
+                switch (s) {
+                    case exs_Conn_Response:
+                        if (sp!=exs_Conn_Response) err = xs_async_call (xas, exs_Conn_HTTPNew, conn);
+                        if (err) return err;
+                        err = xs_async_call (xas, exs_Conn_HTTPRead, conn);   
+                        s = xs_conn_state (conn);
+                        if (s!=exs_Conn_Complete) break;
+                        sp = exs_Conn_Response; //don't trigger exs_Conn_HTTPNew below
+                        //fall through
+
+                    case exs_Conn_Complete:
+                        if (sp!=exs_Conn_Response) err = xs_async_call (xas, exs_Conn_HTTPNew, conn);
+                        if (err) return err;
+                        err = xs_async_call (xas, exs_Conn_HTTPComplete, conn);   
+                        break;
+                }
+                if (err) return err;
+                if (s==exs_Conn_Error) {
+                    //====================
+                    // error case
+                    //====================
+                    err = xs_conn_error(conn);
+                    switch (err) {
+                        case exs_Error_HeaderTooLarge:  xs_conn_write_httperror (conn, 414, "Header Too Large", "Max Header Sizer Exceeded");   break;
+                        case exs_Error_InvalidRequest:  xs_conn_write_httperror (conn, 501, "Not Supported", "Invalid Request");                break;
+                    }
+                } else if (s==exs_Conn_Complete) {
+                    req = xs_conn_getreq(conn);
+                    h   = req&&req->upgrade ? 0 : xs_http_get(req, exs_Req_Method);
+                    //====================
+                    // request
+                    //====================
+                    if (h && (!strcmp(h, "GET") || !strcmp(h, "HEAD"))) {
+                        if (1) {
+                            size_t result;
+                            char path[PATH_MAX]="";
+                            n = xs_strappend (path, sizeof(path), ctx->document_root);
+                            xs_strlcat (path+n, xs_http_get (req, exs_Req_URI), sizeof(path));
+
+                            //xs_conn_write_header (conn, msghdr, sizeof(msghdr)-1);
+                            //xs_conn_write (conn, msg, sizeof(msg)-1);
+                            result = xs_http_fileresponse (ctx, conn, path, h? *h=='G' : 1); //GET vs HEAD
+                            if (1)
+                                xs_logger_debug ("%s - - \"%s %s HTTP/%s\" %d %zd", 
+                                            xs_conn_getsockaddrstr (conn),
+                                            xs_http_get (req, exs_Req_Method), 
+                                            xs_http_get (req, exs_Req_URI),
+                                            xs_http_get (req, exs_Req_Version),
+                                            xs_http_getint (req, exs_Req_Status), result);
+                        }
+                    } else if (h) xs_logger_error ("HTTP method '%s' not handled %s", h ? h : "UNSPECIFIED", xs_conn_getsockaddrstr (conn));
+                    if (xs_http_getint(req, exs_Req_KeepAlive)==0) {
+                        err = exs_Conn_Close;
+                    }
+                }
+            }
+            if (err==0) break;
+
+            //fallthrough...
+            if (err && err!=exs_Conn_Close) xs_logger_error ("closing connections from %s %d", xs_conn_getsockaddrstr (conn), err);
+
+        case exs_Conn_Error:
+        case exs_Conn_Close:
+         //   xs_printf ("msg %d %ld--%ld err:%d\n", message, ncc, (long)xs_atomic_inc(ecc)+1, xs_conn_error(conn));
+            (long)xs_atomic_inc(ecc);
+            xs_conn_dec(conn);
+            err = exs_Conn_Close;
+            break;
+    }
+
+   return err;
 }
 
 
