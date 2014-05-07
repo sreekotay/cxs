@@ -43,12 +43,28 @@ int myhandler (struct xs_async_connect* xas, int message, xs_conn* conn) {
 }
 
 int main(int argc, char *argv[]) {
-    int err=0, accesslog=0;
+    int err=0, accesslog=0, i, port = 8080;
     xs_server_ctx *ctx;
     xs_async_connect* xas;
     char sslkey[] = "default_webxs_ssl_key.pem";
 
     //parse command line
+	for (i=1; i<argc; i++) {
+		if (strcmp(argv[i],"-a")==0) {
+            xs_logger_info ("access log on"); 
+            accesslog = 1;
+        } else if (strcmp(argv[i],"-p")==0) {
+            if (i<argc) port = atoi(argv[(++i)]);
+            xs_logger_info ("port %d", port);
+        } else if (strcmp(argv[i],"-v")==0) {
+            printf ("%s\n", xs_server_name());
+            exit(1);
+        } else if (strcmp(argv[i],"-h")==0) {
+            printf ("Usage: %s [options]\n    -p port#\n    -a \n\n", xs_server_name());
+            exit(1);
+        }
+	}
+
     if (argc>1 && strcmp(argv[1],"-a")==0) {
         printf ("access log on\n");
         accesslog = 1;
@@ -61,8 +77,8 @@ int main(int argc, char *argv[]) {
     if (accesslog==0) xs_logger_level(exs_Log_Error, exs_Log_Info);
 
     //main server loop
-	xs_server_listen     (ctx, 8080, myhandler);
-	xs_server_listen_ssl (ctx, 443,  myhandler, sslkey, sslkey, sslkey);
+	xs_server_listen     (ctx, port, myhandler);
+	//xs_server_listen_ssl (ctx, 443,  myhandler, sslkey, sslkey, sslkey);
 	while (xs_server_active(ctx)) {
         switch (getc(stdin)) {
             case 's': xs_async_print(xas); break;
