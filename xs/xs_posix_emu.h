@@ -58,6 +58,8 @@ typedef void* (*xs_thread_proc)(void*);
 
 #if _MSC_VER
 #define __thread                    _declspec( thread )
+#elif __TINYC__
+#define __thread                    
 #endif
 
 

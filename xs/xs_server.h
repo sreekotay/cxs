@@ -356,7 +356,7 @@ size_t xs_http_writefiledata(xs_conn* conn, const char* path, xs_fileinfo* fdp, 
             if (xs_conn_error(conn)==exs_Error_WriteBusy) {
                 if (blocking==0) return tot; 
                 xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-                xs_conn_cachepurge(conn);
+                //xs_conn_cachepurge(conn);
             } else if (xs_conn_error (conn) || w<=0) {xs_logger_warn ("write error %zd %d", w, xs_conn_error (conn)); break;}//{if (result==0 && tot==0) tot=w; break;}
             tot += w;
         } while (tot<outtot);
@@ -410,7 +410,7 @@ size_t xs_http_writefiledata(xs_conn* conn, const char* path, xs_fileinfo* fdp, 
                 if (xs_conn_error(conn)==exs_Error_WriteBusy) {
                     if (blocking==0) {printf ("err1\n"); close(fi); return tot;} 
                     xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-                    xs_conn_cachepurge (conn);
+                    //xs_conn_cachepurge (conn);
                 } else if (xs_conn_error(conn) || w<=0) break;
             } while (tot<outtot);
             close (fi);
@@ -722,7 +722,7 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
     const char* h;
 
 //    if (message==exs_Conn_Error || message==exs_Conn_Close) 
-    if (message==exs_Conn_New) (long)xs_atomic_inc(ncc);
+    if (message==exs_Conn_New) xs_atomic_inc(ncc);
     //    xs_logger_info ("new %d %ld err:%d", message, (long)xs_atomic_inc(ncc), xs_conn_error(conn));
     switch (message) {
         case exs_Conn_New:
@@ -824,7 +824,7 @@ int xs_server_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
         case exs_Conn_Error:
         case exs_Conn_Close:
          //   xs_printf ("msg %d %ld--%ld err:%d\n", message, ncc, (long)xs_atomic_inc(ecc)+1, xs_conn_error(conn));
-            (long)xs_atomic_inc(ecc);
+            xs_atomic_inc(ecc);
             xs_conn_dec(conn);
             err = exs_Conn_Close;
             break;

@@ -1606,8 +1606,6 @@ int xs_async_defaulthandler (struct xs_async_connect* xas, int message, xs_conn*
 
         case exs_Conn_Error:
         case exs_Conn_Close:
-         //   xs_printf ("msg %d %ld--%ld err:%d\n", message, ncc, (long)xs_atomic_inc(ecc)+1, xs_conn_error(conn));
-            (long)xs_atomic_inc(ecc);
             xs_conn_dec(conn);
             err = exs_Conn_Close;
             break;
