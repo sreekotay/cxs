@@ -1235,6 +1235,7 @@ int xs_conn_cachepurge (xs_conn* conn) {
 }
 int xs_conn_cachefill (xs_conn* conn, const void* buf, size_t len, int force) {
     const size_t maxcache=1000000;
+    return 0;
     if ((force || xs_arr_count(conn->wcache) || conn->is_wblocked) && xs_arr_ptrinrange(char,conn->wcache,buf)==0) {
         if (force || (conn->is_wblocked && len+xs_arr_count(conn->wcache)<=maxcache) || //don't check writable if we're blocked (unless we are at limit) 
             xs_conn_writable(conn)==0 || xs_conn_cachepurge(conn)!=0) {

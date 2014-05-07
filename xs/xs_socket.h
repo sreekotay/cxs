@@ -701,6 +701,7 @@ xs_pollfd* xs_pollfd_Find(xs_pollfd* xp, int pfdTotal) {
     xs_pollfd* root = xp ? xp->root : 0;
     if (xp &&  xp->pfdCount+(xp->pfdCount>>0)+xp->sockCount >= xp->pfdTotal) {
         for (xp=root; xp!=0; xp=xp->next) {
+            if (xp->listenCount) continue;
             if (xp->running==2 || 
                 (xp->running==1 && (xp->pfdCount+xp->sockCount)<(xp->pfdTotal>>1)) ||
                 (xp->running==1 && xp==root && (xp->pfdCount+xp->sockCount)<(xp->pfdTotal>>0)))
