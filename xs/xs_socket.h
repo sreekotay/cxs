@@ -125,7 +125,7 @@ int             xs_sock_err                     ();
 #include "xs_atomic.h"
 #include "xs_posix_emu.h"
 #include "xs_queue.h"
-#include "xs_SSL.h"
+#include "xs_ssl.h"
 #include "xs_logger.h"
 #define _xs_IMPLEMENTATION_
 
