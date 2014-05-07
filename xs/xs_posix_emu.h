@@ -326,6 +326,8 @@ static int xs_poll(struct pollfd *pfdin, int ntotal, int milliseconds) {
 // Windows emulation of time functions
 // from mongoose webserver -- http://code.google.com/p/mongoose/  (plus some other stuff)
 //
+//   NOTE: derived from the MIT licensed version of mongoose (pre 4.0)
+//
 //   Copyright (c) 2004-2013 Sergey Lyubka
 //   
 //   Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -399,6 +401,9 @@ static int clock_gettime(clockid_t clk_id, struct timespec *tp)
 // =================================================================================================================
 // Windows emulation of posix directory functions
 // from mongoose webserver -- http://code.google.com/p/mongoose/  (plus some other stuff)
+//
+//   NOTE: derived from the MIT licensed version of mongoose (pre 4.0)
+//
 //
 //   Copyright (c) 2004-2013 Sergey Lyubka
 //   

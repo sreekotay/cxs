@@ -52,7 +52,9 @@ char            xs_SSL_free             (SSL **ssl);
 
 // Portions Copyright (c) 2007-2014 Sree Kotay
 //  modified to use xs_namespace and re-factored into separate header
-
+//
+// NOTE: derived from the MIT licensed version of mongoose (pre 4.0)
+//
 // Copyright (c) 2004-2013 Sergey Lyubka
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy

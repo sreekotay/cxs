@@ -27,6 +27,7 @@ int myhandler (struct xs_async_connect* xas, int message, xs_conn* conn) {
     int n, rr=1, err=0;
     switch (message) {
         case exs_Conn_WSRead:
+            //websocket example
             while (err==0 && rr) {
                 n = xs_conn_httpread(conn, buf, sizeof(buf)-1, &rr);
                 err = xs_conn_error (conn);
@@ -35,9 +36,11 @@ int myhandler (struct xs_async_connect* xas, int message, xs_conn* conn) {
             }
             break;
 
-        case exs_Conn_HTTPNew:
-            //printf ("conn %d\n", (int)xs_atomic_inc(gcount));
-            break;
+        //http request
+        /*
+        case exs_Conn_HTTPNew:          printf ("conn new  %d\n", (int)xs_atomic_inc(gcount));  break;
+        case exs_Conn_HTTPComplete:     printf ("conn done %d\n", (int)xs_atomic_inc(gcount));  break;
+        */
     }
     return xs_async_defaulthandler (xas, message, conn);
 }
