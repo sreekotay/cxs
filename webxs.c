@@ -1,7 +1,5 @@
 #ifdef WIN32
-    #ifndef FD_SETSIZE
-    #define FD_SETSIZE 1024
-    #endif
+    #define FD_SETSIZE      1024
     #include <ws2tcpip.h>   //if you want IPv6 on Windows, this has to be first
 #endif
 #include <stdlib.h>

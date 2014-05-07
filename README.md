@@ -1,2 +1,3 @@
-cxs
+webxs
 ===
+make -f webxs.mk
