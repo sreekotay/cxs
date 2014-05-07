@@ -38,7 +38,7 @@ int myhandler (struct xs_async_connect* xas, int message, xs_conn* conn) {
             break;
 
         case exs_Conn_HTTPNew:
-            printf ("conn %d\n", (int)xs_atomic_inc(gcount));
+            //printf ("conn %d\n", (int)xs_atomic_inc(gcount));
             break;
     }
     return xs_async_defaulthandler (xas, message, conn);
