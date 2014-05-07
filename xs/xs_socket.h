@@ -403,6 +403,10 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         while (xp->pfdCount<xp->pfdTotal &&
                xs_queue_pop (qp, &qs, 0)==0) {
             int i, fi;
+            if (qs.listener==0 && xp->listenCount) {
+                xs_queue_push (qp, &qs, 1);
+                break;
+            }
             if (qs.listener!=0) {
                 i = xp->listenCount++;
                 memcpy (xp->pfd+i, xp->pfd+xp->pfdMax, sizeof(xp->pfd[i])); //copy to end
@@ -699,7 +703,7 @@ int xs_pollfd_print(xs_pollfd* xp) {
 
 xs_pollfd* xs_pollfd_Find(xs_pollfd* xp, int pfdTotal) {
     xs_pollfd* root = xp ? xp->root : 0;
-    if (xp &&  xp->pfdCount+(xp->pfdCount>>0)+xp->sockCount >= xp->pfdTotal) {
+    if (xp &&  (xp->pfdCount+(xp->pfdCount>>0)+xp->sockCount >= xp->pfdTotal || xp->listenCount)) {
         for (xp=root; xp!=0; xp=xp->next) {
             if (xp->listenCount) continue;
             if (xp->running==2 || 

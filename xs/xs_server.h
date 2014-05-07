@@ -253,6 +253,7 @@ size_t xs_http_dirresponse(xs_server_ctx* ctx, xs_conn* conn, const char* origpa
 //  mime stuff
 // ==================================================
 // nifty mime struct from mongoose.c
+//   NOTE: derived from the MIT licensed version of mongoose (pre 4.0)
 //   Copyright (c) 2004-2013 Sergey Lyubka
 //   see full notice in xs_SSL.h
 static const struct {
