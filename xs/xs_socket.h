@@ -445,7 +445,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
             xp->pss[i].cfd      = 0;
             xs_pollfd_setrunning(xp, 3);
             if (qs.listener==0) (*cbproc) (xp, exs_pollfd_New, qs.s, xp->pss[i].sid, qs.userdata);
-            else xp->pss[i].cfd = (xs_Connfd*)qs.userdata;
+            else xp->pss[i].cfd = (struct xs_Connfd*)qs.userdata;
         #ifdef HAVE_EPOLL
             if (xp->epfd) {
                 struct epoll_event epd = {0};
