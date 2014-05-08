@@ -52,6 +52,7 @@ int myhandler (struct xs_async_connect* xas, int message, xs_conn* conn) {
                 xs_json_tag* jt = xs_arr_ptr(xs_json_tag, gurlarr) + w;
                 xs_sprintf (str, sizeof(str), "Moved\r\nLocation: %.*s", jt->len, jt->ptr);
                 xs_conn_write_httperror (conn, 302, str, "");
+                xs_conn_httplogaccess(conn,0);
                 xs_conn_dec(conn);
                 return exs_Conn_Close;
             }

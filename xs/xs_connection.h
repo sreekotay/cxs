@@ -106,6 +106,8 @@ int                 xs_conn_printf_va       (xs_conn*, const char *fmt, va_list 
 int                 xs_conn_printf_header_va(xs_conn*, const char *fmt, va_list apin);
 int                 xs_conn_write_websocket (xs_conn*, int opcode, const char *data, size_t len, char do_mask);
 size_t              xs_conn_write_httperror (xs_conn*, int statuscode, const char* description, const char* body, ...);
+int                 xs_conn_httplogaccess   (xs_conn*, size_t result);
+
 
 //http request functions                    //note: you must call xs_conn_header_done() afterwards to complete request
 int                 xs_conn_httprequest     (xs_conn*, const char* host, const char* method, const char* path); //host=0 is valid -- will use conn host if present
@@ -1197,6 +1199,18 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
     return nread;
 }
 
+int xs_conn_httplogaccess (xs_conn* conn, size_t result) {
+    xs_httpreq* req = xs_conn_getreq(conn);
+    if (req==0) return -1;
+    xs_logger_debug ("%s - - \"%s %s HTTP/%s\" %d %zd", 
+                xs_conn_getsockaddrstr (conn),
+                xs_http_get (req, exs_Req_Method), 
+                xs_http_get (req, exs_Req_URI),
+                xs_http_get (req, exs_Req_Version),
+                xs_http_getint (req, exs_Req_Status), result);
+    return 0;
+}
+
 // ==============================================
 //  conn write
 // ==============================================
@@ -1591,13 +1605,7 @@ int xs_async_defaulthandler (struct xs_async_connect* xas, int message, xs_conn*
                             //xs_conn_write_header (conn, msghdr, sizeof(msghdr)-1);
                             //xs_conn_write (conn, msg, sizeof(msg)-1);
                             result = xs_http_fileresponse (ctx, conn, path, h? *h=='G' : 1); //GET vs HEAD
-                            if (1)
-                                xs_logger_debug ("%s - - \"%s %s HTTP/%s\" %d %zd", 
-                                            xs_conn_getsockaddrstr (conn),
-                                            xs_http_get (req, exs_Req_Method), 
-                                            xs_http_get (req, exs_Req_URI),
-                                            xs_http_get (req, exs_Req_Version),
-                                            xs_http_getint (req, exs_Req_Status), result);
+                            xs_conn_httplogaccess(conn, result);
                         }
                     } else if (h) xs_logger_error ("HTTP method '%s' not handled %s", h ? h : "UNSPECIFIED", xs_conn_getsockaddrstr (conn));
                     if (xs_http_getint(req, exs_Req_KeepAlive)==0) {
