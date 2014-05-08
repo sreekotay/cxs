@@ -30,22 +30,24 @@ enum
     //  Parser return values
     // ==========================
     exs_JSON_EndOfFile		=  1,
-    exs_JSON_Err_Unclosed	= -1, //unterminated tag, section, comment, or the like
+    exs_JSON_Incomplete		= -1, //unterminated tag, section, comment, or the like
     exs_JSON_Err_Syntax		= -2,
 };
 
 typedef struct xs_json xs_json;
 typedef struct xs_json_tag {
-	char	type, stype;
-    union	{int i; double	d;};
+	char	type, stype, has_escape;
     char*	ptr;
     int		len;
+    union	{int i; double	d;};
 } xs_json_tag;
 
 
 xs_json*	xs_json_create		(const char* str, int len);
 xs_json*	xs_json_destroy		(xs_json* js);
-int			xs_json_next		(xs_json* js, xs_json_tag* tag);
+int			xs_json_next		(xs_json* js, xs_json_tag* tag, int permissive);
+int			xs_json_unescape	(char* dst, int dlen, const char* src, int slen);	//for reading (note: does not force null termination)
+int			xs_json_escape		(char* dst, int dlen, const char* src, int slen);	//for writing: TODO
 
 #endif //header
 
@@ -75,30 +77,30 @@ typedef struct xs_json {
 // =================================================================================================================
 // basic string handling  
 // =================================================================================================================
-char*   xs_JSONReadString   (const char *str, char permissive, char start, char end, char escapeChar, char* hasEscape) {
-    int ret=0;
+char*   xs_JSONReadString   (const char *str, char start, char end, char escapeChar, char* hasEscape) {
+    int ret=0, hasstart;
 
     //skip the spaces
     str								= xs_skipspaces (str, 1);
     if (str==0)						return 0;
-
     if (hasEscape)					*hasEscape = 0;
-    if (*str!=start && permissive)	return xs_skipspaces (str, 0);
     
     //abort if it's not the start;
-    if (*str == start)	str++;
-    else				return 0;
+    hasstart = (*str == start);
+    if (hasstart) str++;
 
     //read the string
     while (*str && ret==0)	{
         //abort properly if we hit the end
-        if (*str==escapeChar)	{str++; str++; if (hasEscape) *hasEscape = 1;}	//escape char
-        else if (*str==end)		{str++; ret=1;}
-        else					 str++;
-        }
+        if (*str==escapeChar)						{str++; str++; if (hasEscape) *hasEscape = 1;}	//escape char
+        else if (*str==end)							{str++; ret=1;}
+		else if (hasstart==0 &&
+			    (*str==':' || *str==','))			ret=1;
+        else										str++;
+    }
 
     //return
-    return ret ? (char*)str : 0;
+    return ret||hasstart==0 ? (char*)str : 0;
 }
 
 // ====================================================================================================================
@@ -110,7 +112,8 @@ xs_json* xs_json_create(const char* str, int len) {
 
 	js->mptr = js->msrc = (char*)str;
 	js->mend = js->msrc + len;
-	xs_arr_push(int, js->mstack, -1); //one object only
+	xs_arr_makespace(int, js->mstack, 16);	//make room
+	xs_arr_push(int, js->mstack, -1);		//one object only
 	return js;
 }
 
@@ -125,21 +128,26 @@ xs_json* xs_json_destroy(xs_json* js) {
 // ====================================================================================================================
 //  xs_json_next
 // ====================================================================================================================
-int xs_json_next(xs_json* js, xs_json_tag* tag) {
+int xs_json_next(xs_json* js, xs_json_tag* tag, int permissive) {
     char* pend = js->mend, *sptr, *nptr, *vptr, hasEscape;
     int sv;
 
     //are we done?
 	if (js==0 || tag==0)								return -1;
-    if (js->mptr==0 || js->mptr==0 || js->mptr>=pend)	return xs_arr_count(js->mstack)==1 ? exs_JSON_EndOfFile : exs_JSON_Err_Unclosed;
+    if (js->mptr==0 || js->mptr==0 || js->mptr>=pend)	return xs_arr_count(js->mstack)==1 ? exs_JSON_EndOfFile : exs_JSON_Incomplete;
 
     //read...
     sptr							= xs_skipspaces (js->mptr, 1);
-    nptr							= xs_JSONReadString (sptr, 1, '"', '"', '\\', &hasEscape);
-    if (nptr==0 || nptr<=sptr)		{js->mptr=pend; return  xs_arr_count(js->mstack)==1 ? exs_JSON_EndOfFile : exs_JSON_Err_Unclosed;}
+    nptr							= xs_JSONReadString (sptr, '"', '"', '\\', &hasEscape);
+
+    if (nptr==0 || nptr<=sptr)		return xs_arr_count(js->mstack)==1 ? exs_JSON_EndOfFile : exs_JSON_Incomplete;
 
 	tag->ptr = 0;
 	tag->type = tag->stype = tag->i = tag->len = 0;
+	tag->has_escape = hasEscape;
+
+	
+    if (js->mstate==0 && permissive && *sptr!='{' && *sptr!='[') js->mstate = exs_JSON_ObjectStart;	//implicit object
 
     //state
     if (js->mstate==-1)	 {
@@ -149,16 +157,17 @@ int xs_json_next(xs_json* js, xs_json_tag* tag) {
     } else if (js->mstate==exs_JSON_ObjectStart && *sptr!='}') {
         //end parsing object
         nptr--;						
-        if (nptr<sptr)				return exs_JSON_Err_Syntax; //must be a key (string)
-        if (*sptr!='\"')			return exs_JSON_Err_Syntax; //must be a key (string)
-        if (*nptr!='\"')			return exs_JSON_Err_Syntax; //must be a key (string)
+        if (nptr<sptr)						return exs_JSON_Err_Syntax; //must be a key (string)
+        if (*sptr!='\"' && permissive==0)	return exs_JSON_Err_Syntax; //must be a key (string)
+        if (*nptr!='\"' && permissive==0)	return exs_JSON_Err_Syntax; //must be a key (string)
+		if (*nptr!='\"') nptr++;
         js->mstate = exs_JSON_Value;
 
         //success
-        tag->ptr	= sptr+1;
-        tag->len	= (int)(nptr-sptr-1);
+        tag->ptr	= sptr+(*sptr=='\"');
+        tag->len	= (int)(nptr-sptr-(*nptr=='\"'));
         tag->type	= exs_JSON_Key;
-        nptr++;
+		if (*nptr=='\"') nptr++;
 
         //next token must be colon
         vptr						= xs_skipspaces (nptr, 1);
@@ -209,20 +218,24 @@ int xs_json_next(xs_json* js, xs_json_tag* tag) {
     } else {
         if ((js->mstate==exs_JSON_ArrayStart) || 
             (js->mstate==exs_JSON_Value) || 
-            (js->mstate==0)) {
+            (js->mstate==0 && permissive)) {
             //must be array, value, or first "object"
         } else return exs_JSON_Err_Syntax;
+
 
         //parsing value
         if (*sptr!='\"') {
             //could be true, false, null, or must be number
             int ch = xs_lower_ (*sptr);
+			tag->ptr  = sptr;
+			tag->len  = (int)(nptr-sptr);
+			tag->type = exs_JSON_Value;
             if (ch=='t' || ch=='f' || ch=='n') {
                 if		(xs_strncmp_case (sptr, "true", 4)==0)	{nptr=sptr+4; tag->stype = exs_JSON_Boolean;  tag->i = 1;}
                 else if (xs_strncmp_case (sptr, "false", 5)==0)	{nptr=sptr+5; tag->stype = exs_JSON_Boolean;  tag->i = 0;}
                 else if	(xs_strncmp_case (sptr, "null", 4)==0)	{nptr=sptr+4; tag->stype = exs_JSON_Null;	  tag->i = 0;}
                 else return exs_JSON_Err_Syntax;
-            } else {
+            } else if (permissive==0) {
                 //must be number
 				/*
                 double value	= 0;
@@ -231,25 +244,24 @@ int xs_json_next(xs_json* js, xs_json_tag* tag) {
 
                 //value
                 tag->d			= value;
-                tag->stype		= exs_JSON_Number;
 				*/
-            }
+                tag->stype		= exs_JSON_Number;
+            } else tag->stype	= exs_JSON_String;
 
-			tag->ptr  = sptr+1;
-			tag->len  = (int)(nptr-sptr-1);
-			tag->type = exs_JSON_Value;
         } else {
             //parsing string
             nptr--;						
-            if (nptr<sptr)				return exs_JSON_Err_Syntax; //must be a key (string)
-            if (*sptr!='\"')			return exs_JSON_Err_Syntax; //must be a key (string)
-            if (*nptr!='\"')			return exs_JSON_Err_Syntax; //must be a key (string)
+            if (nptr<sptr)								return exs_JSON_Err_Syntax; //must be a key (string)
+            if (*sptr!='\"' && permissive==0)			return exs_JSON_Err_Syntax; //must be a key (string)
+            if (*nptr!='\"' && permissive==0)			return exs_JSON_Err_Syntax; //must be a key (string)
+			if (*nptr!='\"') nptr++;
 
             //success
-            tag->ptr  = sptr+1;
-            tag->len  = (int)(nptr-sptr-1);
-            tag->type = exs_JSON_Value;
-            nptr++;
+            tag->ptr	= sptr+(*sptr=='\"');
+            tag->len	= (int)(nptr-sptr-(*nptr=='\"'));
+            tag->type	= exs_JSON_Value;
+			tag->stype	= exs_JSON_String;
+			if (*nptr=='\"') nptr++;
         }
 
         //next token must be comma or container terminator
@@ -276,6 +288,44 @@ int xs_json_next(xs_json* js, xs_json_tag* tag) {
 }
 
 
+int  xs_json_unescape (char* dst, int dlen, const char* src, int slen) {
+	//copy the rest of the text
+	char* d = dst;
+	const char* s = src, *e = src+(slen>dlen?dlen:slen);
+	int ha, hb, hc, hd;
+	if (slen==0 || dlen==0 || src==0 || dst==0) return 0;
+	while (s<e && *s) {
+		if (*s=='\\') {
+			//detected an escape
+			s++;
+			if (s>=e)	return exs_JSON_Err_Syntax;
+			switch (*s) {
+				case 'r':	*d++ = '\r';	break;
+				case 'n':	*d++ = '\n';	break;
+				case 'f':	*d++ = '\f';	break;
+				case 'b':	*d++ = '\b';	break;
+				case 't':	*d++ = '\t';	break;
+				case '"':	*d++ = '"';		break;
+				case '\\':	*d++ = '\\';	break;
+				case '/':	*d++ = '/';		break;
+				case 'u':
+					if (s+3>=e)	return exs_JSON_Err_Syntax;
+					ha = xs_fromhex(s[0]);	 if (ha<0)	return exs_JSON_Err_Syntax;
+					hb = xs_fromhex(s[1]);	 if (hb<0)	return exs_JSON_Err_Syntax;
+					hc = xs_fromhex(s[2]);	 if (hc<0)	return exs_JSON_Err_Syntax;
+					hd = xs_fromhex(s[3]);	 if (hd<0)	return exs_JSON_Err_Syntax;
+					*d++ = (ha<<12) + (hb<<8) + (hc<<4) + hd;
+					s+=3; //4th will be added below
+					break;
+				default:
+					return exs_JSON_Err_Syntax;
+					break;
+			}
+		} else *d++ = *s;
+		s++;
+	}
+	return 0;
+}
 
 #endif //_xs_JSON_IMPL_
 #endif //_xs_IMPLEMENTATION_

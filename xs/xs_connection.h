@@ -463,11 +463,11 @@ int xs_conn_seterr (xs_conn* conn) {
 }
 
 int xs_http_state (xs_httpreq *req) {
-    if (req==0 || req->reqlen==0)                       return exs_Conn_Pending;
+    if (req==0 || req->reqlen==0)                               return exs_Conn_Pending;
     if (req->contentlen && req->chunked==0 &&
-        req->consumed == req->contentlen)               return exs_Conn_Complete;
-    if (req->contentlen || req->chunked)                return exs_Conn_Response;
-    if (req->statuscode>=300 && req->statuscode<=303)   return exs_Conn_Redirect;
+        req->consumed == req->contentlen)                       return exs_Conn_Complete;
+    if (req->contentlen || req->chunked)                        return exs_Conn_Response;
+    if (req->statuscode>=300 && req->statuscode<=303)           return exs_Conn_Redirect;
     return exs_Conn_Complete;
 }
 
@@ -585,7 +585,7 @@ size_t xs_conn_write_httperror (xs_conn* conn, int statuscode, const char* descr
         result = xs_conn_printf_va (conn, body, ap_copy);
         va_end (ap_copy);
     }
-    xs_http_setint (xs_conn_getreq(conn), exs_Req_Status, statuscode);
+    //xs_http_setint (xs_conn_getreq(conn), exs_Req_Status, statuscode); //this isn't right -- $$$SREE
     //if (sock) xs_sock_setnonblocking(sock, 1);
     return result;
 }
@@ -1116,7 +1116,7 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
     if (req && req->reqlen)
     if (((/*s==exs_Conn_Request || */s==exs_Conn_Redirect) && req->contentlen==0 && req->chunked==0) || //or it was a request/redirect only
         (req && req->statuscode==100 && s==exs_Conn_Response))                                          //or its a response of 100
-        {assert(0); xs_logger_error ("sree, you are fart knocker -- see comment in code.");}
+        {/*assert(0);*/xs_logger_error ("sree, you are fart knocker -- see comment in code.");}
 
     
     //are we looking for a new request?

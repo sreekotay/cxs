@@ -11,30 +11,32 @@
 #include "xs/xs_connection.h"
 #include "xs/xs_fileinfo.h"
 #include "xs/xs_json.h"
+#include "xs/xs_arr.h"
+#include "xs/xs_printf.h"
 
-xs_atomic gcount=0;
+xs_atomic gcount=0, gredir=0;
+xs_arr gurlarr={0};
+void loadredirfile();
 
-static void websocket_ready_handler(xs_conn *conn) {
-    static const char *message = "server ready";
-    xs_conn_write_websocket(conn, exs_WS_TEXT, message, strlen(message), 0);
-}
-
-static int websocket_data_handler(xs_conn *conn, char *data, size_t datalen) {
-    xs_conn_write_websocket(conn, exs_WS_TEXT, data, datalen, 0);
-    return memcmp(data, "exit", 4);
-}
 
 int myhandler (struct xs_async_connect* xas, int message, xs_conn* conn) {
     char buf[1024];
+    const char wsmsg[] = "server ready";
     int n, rr=1, err=0;
     switch (message) {
+        case exs_Conn_WSNew:
+            xs_conn_write_websocket(conn, exs_WS_TEXT, wsmsg, strlen(wsmsg), 0);
+            break;
         case exs_Conn_WSRead:
             //websocket example
             while (err==0 && rr) {
                 n = xs_conn_httpread(conn, buf, sizeof(buf)-1, &rr);
                 err = xs_conn_error (conn);
-                if (n>0 && websocket_data_handler (conn, buf, n)==0)
-                    xs_conn_write_websocket (conn, exs_WS_CONNECTION_CLOSE, 0, 0, 0);
+                if (n>0) {
+                    xs_conn_write_websocket(conn, exs_WS_TEXT, buf, n, 0);
+                    if (n>=4 && memcmp (buf,"exit",4)==0)
+                        xs_conn_write_websocket (conn, exs_WS_CONNECTION_CLOSE, 0, 0, 0);
+                }
             }
             break;
 
@@ -43,6 +45,16 @@ int myhandler (struct xs_async_connect* xas, int message, xs_conn* conn) {
         case exs_Conn_HTTPNew:          printf ("conn new  %d\n", (int)xs_atomic_inc(gcount));  break;
         case exs_Conn_HTTPComplete:     printf ("conn done %d\n", (int)xs_atomic_inc(gcount));  break;
         */
+        case exs_Conn_HTTPComplete:
+            if (xs_arr_count(gurlarr)) {
+                int w = xs_atomic_inc(gredir)%xs_arr_count(gurlarr);
+                char str[1024];
+                xs_json_tag* jt = xs_arr_ptr(xs_json_tag, gurlarr) + w;
+                xs_sprintf (str, sizeof(str), "Moved\r\nLocation: %.*s", jt->len, jt->ptr);
+                xs_conn_write_httperror (conn, 302, str, "");
+                return exs_Conn_Handled;
+            }
+            break;
     }
     return xs_async_defaulthandler (xas, message, conn);
 }
@@ -52,9 +64,6 @@ int main(int argc, char *argv[]) {
     xs_server_ctx *ctx;
     xs_async_connect* xas;
     char sslkey[] = "default_webxs_ssl_key.pem";
-    xs_fileinfo fi;
-    xs_json* js;
-    xs_json_tag jt = {0};
 
     //init all
     xs_server_init_all (1);
@@ -76,38 +85,19 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i],"-h")==0) {
             printf ("Usage: %s [options]\n    -p port#\n    -a \n\n", xs_server_name());
             exit(1);
+        } else if (strcmp(argv[i], "-r")==0) {
+            loadredirfile();
         }
 	}
 
     if (argc>1 && strcmp(argv[1],"-a")==0) {
-        printf ("access log on\n");
+        xs_logger_info ("access log on\n");
         accesslog = 1;
     } 
 
-    /*
-    xs_stat ("sample.json", &fi);
-    fi.status = 1;
-    xs_fileinfo_loaddata (&fi, "sample.json");
-    js = xs_json_create ((const char*)fi.data, fi.size);
-    while (xs_json_next (js, &jt)==0) {
-        switch (jt.type) {
-             case exs_JSON_ObjectStart: printf ("{\n");   break;
-             case exs_JSON_ObjectEnd:   printf ("}\n");   break;
-             case exs_JSON_ArrayStart:  printf ("[\n");   break;
-             case exs_JSON_ArrayEnd:    printf ("]\n");   break;
+    
 
-            case exs_JSON_Key:
-                printf ("\"%.*s\" : ", jt.len, jt.ptr);
-                break;
-
-            case exs_JSON_Value:
-                printf ("\"%.*s\"\n", jt.len, jt.ptr);
-                break;
-        }
-    }
-    xs_fileinfo_loaddata (&fi, 0);
-    */
-
+    //xs_stat ("sample.json", &fi);
 
     //start server and connections
     ctx = xs_server_create(".", argv[0]);
@@ -119,9 +109,8 @@ int main(int argc, char *argv[]) {
 	xs_server_listen_ssl (ctx, 443,  myhandler, sslkey, sslkey, sslkey);
     if (singlethreadaccept) xs_async_lock(xas);
 	while (xs_server_active(ctx)) {
-        switch (getc(stdin)) {
-            case 's': xs_async_print(xas); break;
-        }
+        //sleep(1);
+        getc(stdin);
     }
 	xs_logger_fatal ("---- done ----");
 
@@ -132,7 +121,35 @@ int main(int argc, char *argv[]) {
 }
 
 
+void loadredirfile() {
+    xs_fileinfo* fi;
+    xs_json* js;
+    xs_json_tag jt = {0};
+    int err=0;
+    xs_fileinfo_get (&fi, "redirect.json", 1);
+    xs_fileinfo_lock (fi);
+    js = xs_json_create ((const char*)fi->data, fi->size);
+    while ((err=xs_json_next (js, &jt, 1))==0) {
+        switch (jt.type) {
+             case exs_JSON_ObjectStart: xs_logger_info ("{");   break;
+             case exs_JSON_ObjectEnd:   xs_logger_info ("}");   break;
+             case exs_JSON_ArrayStart:  xs_logger_info ("[");   break;
+             case exs_JSON_ArrayEnd:    xs_logger_info ("]");   break;
 
+            case exs_JSON_Key:
+                xs_logger_info ("\"%.*s\" : ", jt.len, jt.ptr);
+                break;
+
+            case exs_JSON_Value:
+                xs_logger_info ("\"%.*s\"", jt.len, jt.ptr);
+                xs_arr_add(xs_json_tag, gurlarr, &jt, 1);
+                break;
+        }
+    }
+    xs_fileinfo_unlock (fi);
+    xs_fileinfo_unloaddata (fi);
+    if (err<0) xs_logger_error("json redirect error: %d", err);
+}
 
 
 //required libraries

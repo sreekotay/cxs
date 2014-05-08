@@ -89,6 +89,7 @@
     <ClInclude Include="..\..\xs\xs_connection.h" />
     <ClInclude Include="..\..\xs\xs_crc.h" />
     <ClInclude Include="..\..\xs\xs_fileinfo.h" />
+    <ClInclude Include="..\..\xs\xs_json.h" />
     <ClInclude Include="..\..\xs\xs_logger.h" />
     <ClInclude Include="..\..\xs\xs_md5.h" />
     <ClInclude Include="..\..\xs\xs_pipe.h" />

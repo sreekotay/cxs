@@ -593,7 +593,7 @@ static int xs_mkdir(const char *path, int mode) {
 
 #include "xs_types.h"
 
-void *mmap(void *addr, size_t length, int prot, int flags, int fd, size_t offset) {
+static void *mmap(void *addr, size_t length, int prot, int flags, int fd, size_t offset) {
 	void *p, *start=0; 
     xsint32 winprot = PAGE_READONLY, winaccess = FILE_MAP_READ;
 	SECURITY_ATTRIBUTES sec = { sizeof(SECURITY_ATTRIBUTES), (void*)0, FALSE };
@@ -635,7 +635,7 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, size_t offset
 }
 
 
-int munmap(void* const start, const size_t len) {
+static int munmap(void* const start, const size_t len) {
     (void)len;
 	return UnmapViewOfFile(start) ? 0 : -1;
 }

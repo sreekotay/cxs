@@ -27,8 +27,8 @@ static int              xs_tohex            (int v, int upper);
 static int              xs_strappend        (char* d, int n, const char* s);
 static int              xs_strlappend       (char* d, int n, const char* s, int l);
 static int              xs_b64_encode       (char *dst, const unsigned char *src, int count);
-//xsuint32                xs_rand             ();
-//static xsuint32         xs_rand_i           (int range)     {return xs_rand()%range;}
+xsuint32                xs_rand             ();
+static xsuint32         xs_rand_i           (int range);
 #define                 xs_rot32(x,k)       ((((xsuint32)x)<<(k))|(((xsuint32)x)>>(32-(k))))
 static char	            xs_isspace	        (const char* str)					{return (*str) && ((*str=='\t') || (*str==' ') || (*str=='\r') || (*str=='\n'));}
 static char*	        xs_skipspaces	    (const char* str, char skipSpace)	{if (str) while (*str && xs_isspace(str)==skipSpace)	str++;	return (char*)str;}
@@ -348,10 +348,11 @@ void xs_raninit( xs_ranctx *x, xsuint32 seed ) {
     for (i=0; i<20; i++) xs_ranval(x);
 }
 
-int         gxs_raninit=0;
-xs_ranctx   gxs_seed={0};
-void        xs_rand_init(xsuint32 seed)   {gxs_raninit=1; xs_raninit(&gxs_seed, seed);}
-xsuint32    xs_rand()                     {if (gxs_raninit==0) xs_rand_init (0x12345678); return xs_ranval(&gxs_seed);}
+int                     gxs_raninit=0;
+xs_ranctx               gxs_seed={0};
+void                    xs_rand_init(xsuint32 seed)     {gxs_raninit=1; xs_raninit(&gxs_seed, seed);}
+xsuint32                xs_rand()                       {if (gxs_raninit==0) xs_rand_init (0x12345678); return xs_ranval(&gxs_seed);}
+static xsuint32         xs_rand_i(int range)            {return xs_rand()%range;}
 
 
 #endif //_xs_UTILS_IMPL_

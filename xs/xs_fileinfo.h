@@ -27,6 +27,7 @@ int     xs_fileinfo_get         (xs_fileinfo** fip, const char *path, int load_d
 void    xs_fileinfo_lock        (xs_fileinfo*  fi); //lock function
 void    xs_fileinfo_unlock      (xs_fileinfo*  fi); //lock function
 int     xs_fileinfo_loaddata    (xs_fileinfo*  fi,  const char *path);
+int     xs_fileinfo_unloaddata  (xs_fileinfo*  fi);
 
 #endif //header
 
@@ -168,11 +169,11 @@ void xs_fileinfo_unlock(xs_fileinfo* fi) {
 
 
 int xs_fileinfo_loaddata(xs_fileinfo* fi, const char *path) { //assumes valid xs_fileinfo* and fi->status==1
-    int maxsize = 10000000, f;
+    int maxsize = 10000000, f, locallock = fi->status;
     if (fi==0 || fi->stat_ret || fi->status>1 || fi->is_directory) return -1;
 
     //status is 2
-    xs_atomic_spin (xs_atomic_swap (fi->status, 1, 2)!=1);
+    xs_atomic_spin (xs_atomic_swap (fi->status, locallock, 2)!=locallock);
     if (path==0 || fi->size>(size_t)maxsize) {
         printf ("unmap2\n");  fflush(stdout);
         if (fi->data) {if (_use_MMAP_) munmap (fi->data, fi->size); else free(fi->data);}
@@ -194,9 +195,11 @@ int xs_fileinfo_loaddata(xs_fileinfo* fi, const char *path) { //assumes valid xs
         fi->data = 0;
     }
 
-    fi->status = 1;
+    fi->status = locallock;
     return fi->data ? 0 : -3;
 }
+
+int xs_fileinfo_unloaddata(xs_fileinfo* fi) {return xs_fileinfo_loaddata(fi, 0);}
 
 int xs_fileinfo_get(xs_fileinfo** fip, const char *path, int load_data) {
     int deltasecs = 2;
