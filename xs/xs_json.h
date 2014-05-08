@@ -105,7 +105,7 @@ char*   xs_JSONReadString   (const char *str, char permissive, char start, char 
 //  xs_json_create
 // ====================================================================================================================
 xs_json* xs_json_create(const char* str, int len) {
-	xs_json* js = calloc (sizeof(xs_json), 1);
+	xs_json* js = (xs_json*)calloc (sizeof(xs_json), 1);
 	if (js==0) return 0;
 
 	js->mptr = js->msrc = (char*)str;

@@ -126,7 +126,7 @@ int main(int argc, char *argv[]) {
 	xs_logger_fatal ("---- done ----");
 
     //all done
-    xs_server_terminate_all(0,0);
+    xs_server_terminate_all();
     xs_logger_counter_print();
     return 7734;
 }

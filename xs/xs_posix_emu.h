@@ -674,6 +674,7 @@ static char xs_path_isabsolute(const char *path) {
 #include "xs_printf.h"
 
 #ifdef WIN32
+#include <direct.h>
 #endif
 
 static void xs_path_setabsolute(char *path, int pathsize, const char *rootpath, const char* exepath) {

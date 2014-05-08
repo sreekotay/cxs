@@ -46,7 +46,7 @@ static void*    xs_arr_add_         (xs_array* ar, const void* data, int n, int 
                                                                                                  if (err) return 0; if (data) memcpy (a, data, n*es); ar->aCount += n; return a;}
 static void*    xs_arr_             (xs_array* ar, int i, int es)                               {return (char*)ar->aData + i*es;}
 static void     xs_arr_replace_     (xs_array* ar, void* data, int c, int s)                    {ar->aData=(void*)data; ar->aCount=c; ar->aSpace=s;}//unsafe
-static int      xs_arr_ptrinrange_  (xs_array* ar, void* p, int es)                             {char*cp=p,*ap=ar->aData; return cp>=ap&&cp<(ap+ar->aSpace*es);}  
+static int      xs_arr_ptrinrange_  (xs_array* ar, void* p, int es)                             {char*cp=(char*)p,*ap=(char*)ar->aData; return cp>=ap&&cp<(ap+ar->aSpace*es);}  
 
 #define         xs_arr_create(ar)                                                                xs_arr_create_(&ar)
 #define         xs_arr_destroy(ar)                                                               xs_arr_destroy_(&ar)

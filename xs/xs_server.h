@@ -365,7 +365,7 @@ size_t xs_http_writefiledata(xs_conn* conn, const char* path, xs_fileinfo* fdp, 
         //from file
         //xs_logger_info ("reading file %s", path);
         size_t bsize    = 256<<10; 
-        char *bufn      = malloc(bsize = bsize>outtot ? outtot : bsize);
+        char *bufn      = (char*)malloc(bsize = bsize>outtot ? outtot : bsize);
         if (bufn==0)    {bufn=buf; bsize=sizeof(buf);}
 
 #if 0
@@ -675,7 +675,7 @@ void writeq_proc (xs_queue* qs, writeq_data *wqd, void* privateData) {
 //  core server mgmt
 // ==================================================
 xs_server_ctx* xs_server_create(const char* rel_path, const char* root_path) {
-    xs_server_ctx* ctx = calloc(sizeof(xs_server_ctx), 1);
+    xs_server_ctx* ctx = (xs_server_ctx*)calloc(sizeof(xs_server_ctx), 1);
     struct xs_async_connect* xas=xs_async_create(8);
     xs_strlcpy(ctx->server_name, xs_server_name(), sizeof(ctx->server_name));
     xs_path_setabsolute (ctx->document_root, sizeof(ctx->document_root), rel_path, root_path);
@@ -719,7 +719,7 @@ int xs_server_listen_ssl (xs_server_ctx* ctx, int port, xs_async_callback cb, co
 #ifdef USE_IPV6
  	err = xs_conn_listen(&conn6, port, 1, 1);   //v6 socket (done 
     if (err) xs_logger_error ("listen v6 [%d]: %d se:%d", port, err, xs_sock_err());
-    if (conn6) err = xs_SSL_set_certs(xs_conn_sslctx(conn6), privateKeyPem, certPem, certChainPem);
+    if (conn6) err = xs_SSL_set_certs((SSL_CTX*)xs_conn_sslctx(conn6), privateKeyPem, certPem, certChainPem);
 
 	if (err) xs_logger_error ("SSL init error [%d]: %d se:%d", port, err, xs_sock_err());
     else     ctx->xas = xs_async_listen (ctx->xas, conn6, cb);
@@ -727,7 +727,7 @@ int xs_server_listen_ssl (xs_server_ctx* ctx, int port, xs_async_callback cb, co
 #if (!defined USE_IPV6) || defined WIN32
     err = xs_conn_listen(&conn4, port, 1, 0);   //v4 socket (redundant on linux)
 	if (err) xs_logger_error ("listen v4 [%d]: %d se:%d", port, err, xs_sock_err());
-    if (conn4) err = xs_SSL_set_certs(xs_conn_sslctx(conn4), privateKeyPem, certPem, certChainPem);
+    if (conn4) err = xs_SSL_set_certs((SSL_CTX*)xs_conn_sslctx(conn4), privateKeyPem, certPem, certChainPem);
 
 	if (err) xs_logger_error ("SSL init error [%d]: %d se:%d", port, err, xs_sock_err());
     else     ctx->xas = xs_async_listen (ctx->xas, conn4, cb);
@@ -804,7 +804,7 @@ int xs_server_terminate_all() {
 #include "xs_queue.h"
 #include "xs_crc.h"
 #include "xs_sha1.h"
-#include "xs_compress.h"
+//#include "xs_compress.h"
 #include "xs_logger.h"
 #include "xs_fileinfo.h"
 #include "xs_server.h"

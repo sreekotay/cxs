@@ -184,9 +184,9 @@ int xs_fileinfo_loaddata(xs_fileinfo* fi, const char *path) { //assumes valid xs
     //still got it?
     if (path && (_use_MMAP_ ? 1 : (fi->data!=0)) && (f=xs_open (path, O_RDONLY|O_BINARY, 0))!=0) {
         //read it
-        if (fi->data==0)            fi->data = mmap (0, fi->size, PROT_READ, MAP_SHARED, f, 0);
+        if (fi->data==0)            fi->data = (char*)mmap (0, fi->size, PROT_READ, MAP_SHARED, f, 0);
         else                        fi->size = read(f, fi->data, fi->size);
-        if (fi->data==(void*)-1)    fi->data = 0;
+        if (fi->data==(char*)-1)    fi->data = 0;
         close(f);
     } else if (fi->data) {
         //error
