@@ -169,11 +169,12 @@ void xs_fileinfo_unlock(xs_fileinfo* fi) {
 
 int xs_fileinfo_loaddata(xs_fileinfo* fi, const char *path) { //assumes valid xs_fileinfo* and fi->status==1
     int maxsize = 10000000, f;
-    if (fi==0 || fi->stat_ret || fi->status==0 || fi->is_directory) return -1;
+    if (fi==0 || fi->stat_ret || fi->status>1 || fi->is_directory) return -1;
 
     //status is 2
     xs_atomic_spin (xs_atomic_swap (fi->status, 1, 2)!=1);
     if (path==0 || fi->size>(size_t)maxsize) {
+        printf ("unmap2\n");  fflush(stdout);
         if (fi->data) {if (_use_MMAP_) munmap (fi->data, fi->size); else free(fi->data);}
         fi->data = 0;
     } else if (path && _use_MMAP_==0) {
@@ -183,8 +184,9 @@ int xs_fileinfo_loaddata(xs_fileinfo* fi, const char *path) { //assumes valid xs
     //still got it?
     if (path && (_use_MMAP_ ? 1 : (fi->data!=0)) && (f=xs_open (path, O_RDONLY|O_BINARY, 0))!=0) {
         //read it
-        if (fi->data==0)    fi->data = mmap (0, fi->size, PROT_READ, MAP_SHARED, f, 0);
-        else                fi->size = read(f, fi->data, fi->size);
+        if (fi->data==0)            fi->data = mmap (0, fi->size, PROT_READ, MAP_SHARED, f, 0);
+        else                        fi->size = read(f, fi->data, fi->size);
+        if (fi->data==(void*)-1)    fi->data = 0;
         close(f);
     } else if (fi->data) {
         //error
