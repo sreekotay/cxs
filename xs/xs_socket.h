@@ -410,7 +410,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         if (xp->pfdCount<xp->pfdTotal &&
                xs_queue_pop (qp, &qs, 0)==0) {
             int i, fi;
-            if (qs.listener==0 && xp->listenCount) {
+            if (0 && qs.listener==0 && xp->listenCount) {
                 xs_queue_push (qp, &qs, 1);
                 break;
             }
@@ -635,7 +635,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
             //if (qp && qp->qDepth==0) 
                 xs_pollfd_Sleep(xp);
         }
-    } while (xp->running>0 && (xs_pollfd_Processing(xp)|| (qp && qp->qDepth!=0)));
+    } while (xp->running>0 && xs_pollfd_Processing(xp));
     xs_pollfd_setrunning(xp, -1); //dead
     xs_atomic_dec (xp->ctx->threadcount);
 #ifdef HAVE_EPOLL
@@ -713,9 +713,8 @@ int xs_pollfd_print(xs_pollfd* xp) {
 
 xs_pollfd* xs_pollfd_Find(xs_pollfd* xp, int pfdTotal) {
     xs_pollfd* root = xp ? xp->root : 0;
-    if (xp &&  (xp->pfdCount+(xp->pfdCount>>0)+xp->sockCount >= xp->pfdTotal || xp->listenCount)) {
+    if (xp &&  xp->pfdCount+(xp->pfdCount>>0)+xp->sockCount >= xp->pfdTotal) {
         for (xp=root; xp!=0; xp=xp->next) {
-            if (xp->listenCount) continue;
             if (xp->running==2 || 
                 (xp->running==1 && (xp->pfdCount+xp->sockCount)<(xp->pfdTotal>>1)) ||
                 (xp->running==1 && xp==root && (xp->pfdCount+xp->sockCount)<(xp->pfdTotal>>0)))

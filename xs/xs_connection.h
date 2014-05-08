@@ -1531,7 +1531,6 @@ int xs_async_defaulthandler (struct xs_async_connect* xas, int message, xs_conn*
 
     switch (message) {
         case exs_Conn_New:
-            xs_conn_inc(conn);
             break;
 
         case exs_Conn_Read:
