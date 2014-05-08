@@ -1605,7 +1605,7 @@ int xs_async_defaulthandler (struct xs_async_connect* xas, int message, xs_conn*
                     }
                 }
             }
-            if (err==0) break;
+            if (err==0 || err==exs_Error_WriteBusy) break;
 
             //fallthrough...
             if (err && err!=exs_Conn_Close) xs_logger_error ("closing connections from %s %d", xs_conn_getsockaddrstr (conn), err);
