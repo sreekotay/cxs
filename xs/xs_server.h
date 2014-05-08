@@ -479,6 +479,16 @@ static char xs_http_notmodified(const xs_httpreq *req, const xs_fileinfo *fd) {
 #define INT64_FMT		"lld"
 #endif
 
+
+
+typedef struct writeq_data {
+    xs_atomic seq;
+    char* path;
+    xsuint64 rs, re;
+    xs_conn *conn;
+} writeq_data;
+
+
 size_t xs_http_fileresponse(xs_server_ctx* ctx, xs_conn* conn, const char* path, int dobody) {
     const xs_httpreq* req = xs_conn_getreq(conn);
     xs_fileinfo fd, *fdp=&fd;
@@ -635,14 +645,6 @@ size_t xs_http_fileresponse(xs_server_ctx* ctx, xs_conn* conn, const char* path,
 }
 
 
-typedef struct writeq_data {
-    xs_atomic seq;
-    char* path;
-    xsuint64 rs, re;
-    xs_conn *conn;
-} writeq_data;
-
-size_t xs_http_writefiledata(xs_conn* conn, const char* path, xs_fileinfo* fdp, size_t rs, size_t re, int blocking);
 
 void writeq_proc (xs_queue* qs, writeq_data *wqd, void* privateData) {
     xs_fileinfo *fdp;
@@ -659,6 +661,8 @@ void writeq_proc (xs_queue* qs, writeq_data *wqd, void* privateData) {
     } else {
         if (result==0) printf ("closed  %ld of %ld -- %ld :: %ld\n", (long)result, (long)(wqd->re-wqd->rs), (long)wqd->rs, (long)wqd->re);
         if (wqd->path) free(wqd->path);
+        if (xs_http_getint(xs_conn_getreq(wqd->conn), exs_Req_KeepAlive)==0)
+            xs_conn_close(wqd->conn);
         xs_conn_dec(wqd->conn);
     }
     (void)qs;
@@ -675,8 +679,8 @@ xs_server_ctx* xs_server_create(const char* rel_path, const char* root_path) {
     struct xs_async_connect* xas=xs_async_create(8);
     xs_strlcpy(ctx->server_name, xs_server_name(), sizeof(ctx->server_name));
     xs_path_setabsolute (ctx->document_root, sizeof(ctx->document_root), rel_path, root_path);
-    //xs_queue_create (&ctx->writeq, sizeof(writeq_data), 1024*10, (xs_queue_proc)writeq_proc, NULL);
-    //xs_queue_launchthreads (&ctx->writeq, 2, 0);
+    xs_queue_create (&ctx->writeq, sizeof(writeq_data), 1024*10, (xs_queue_proc)writeq_proc, NULL);
+    xs_queue_launchthreads (&ctx->writeq, 20, 0);
     xs_async_setuserdata(xas, ctx);
     ctx->xas = xas;
 

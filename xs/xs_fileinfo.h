@@ -173,15 +173,15 @@ int xs_fileinfo_loaddata(xs_fileinfo* fi, const char *path) { //assumes valid xs
 
     //status is 2
     xs_atomic_spin (xs_atomic_swap (fi->status, 1, 2)!=1);
-    if (fi->size>(size_t)maxsize) {
+    if (path==0 || fi->size>(size_t)maxsize) {
         if (fi->data) {if (_use_MMAP_) munmap (fi->data, fi->size); else free(fi->data);}
         fi->data = 0;
-    } else if (_use_MMAP_==0) {
+    } else if (path && _use_MMAP_==0) {
         fi->data = fi->data ? (char*)realloc(fi->data, fi->size) : (char*)malloc (fi->size);
     }
 
     //still got it?
-    if ((_use_MMAP_ ? 1 : (fi->data!=0)) && (f=xs_open (path, O_RDONLY|O_BINARY, 0))!=0) {
+    if (path && (_use_MMAP_ ? 1 : (fi->data!=0)) && (f=xs_open (path, O_RDONLY|O_BINARY, 0))!=0) {
         //read it
         if (fi->data==0)    fi->data = mmap (0, fi->size, PROT_READ, MAP_SHARED, f, 0);
         else                fi->size = read(f, fi->data, fi->size);

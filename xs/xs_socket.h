@@ -72,6 +72,7 @@ int             xs_pollfd_stop                  (xs_pollfd* xp); //convenience -
 xs_pollfd*      xs_pollfd_inc                   (xs_pollfd *xp);
 xs_pollfd*      xs_pollfd_dec                   (xs_pollfd *xp);
 int             xs_pollfd_print                 (xs_pollfd* xp);
+int             xs_pollfd_lock                  (xs_pollfd* xp);
 
 //socket convenience functions
 int             xs_sock_open                    (int* sock, const char *host, int port, char use_tcp);
@@ -257,6 +258,12 @@ xs_pollfd*    xs_pollfd_dec(xs_pollfd *xp) {
     return xp;
 }
 
+int xs_pollfd_lock(xs_pollfd *xp) {
+    if (xp==0) return 0;
+    xp->pfdTotal = xp->pfdCount + (xp->ctx?xp->ctx->acceptqueue.qDepth:0);
+    return 0;
+}
+
 xs_pollfd*  xs_pollfd_destroy (xs_pollfd* xp) {
     struct xs_pollfd *n, *nn;
     xs_pollfd_stop (xp);
@@ -400,7 +407,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         // ==========================
         // get new from queue
         // ==========================
-        while (xp->pfdCount<xp->pfdTotal &&
+        if (xp->pfdCount<xp->pfdTotal &&
                xs_queue_pop (qp, &qs, 0)==0) {
             int i, fi;
             if (qs.listener==0 && xp->listenCount) {
@@ -622,10 +629,13 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         }
 
         //if (xp->root==xp || 1) 
-        while (xp->running>0 && !xs_pollfd_Processing(xp)) {
-            if (qp && qp->qDepth==0) {/*break;*/ xs_pollfd_Sleep(xp); }
+        //if (qp && qp->qDepth==0) 
+        while (xp->running>0 && !(xs_pollfd_Processing(xp))) {
+            //break;
+            //if (qp && qp->qDepth==0) 
+                xs_pollfd_Sleep(xp);
         }
-    } while (xp->running>0 && xs_pollfd_Processing(xp));
+    } while (xp->running>0 && (xs_pollfd_Processing(xp)|| (qp && qp->qDepth!=0)));
     xs_pollfd_setrunning(xp, -1); //dead
     xs_atomic_dec (xp->ctx->threadcount);
 #ifdef HAVE_EPOLL

@@ -27,5 +27,6 @@ HEADERS += \
     ../../xs/xs_socket.h \
     ../../xs/xs_ssl.h \
     ../../xs/xs_types.h \
-    ../../xs/xs_utils.h
+    ../../xs/xs_utils.h \
+    ../../xs/xs_startup.h
 

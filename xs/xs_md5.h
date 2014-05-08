@@ -482,6 +482,8 @@ void md5_finish(md5_state_t *pms, md5_byte_t digest[16])
 // =================================================================================================================
 // from mongoose webserver -- http://code.google.com/p/mongoose/  
 //
+//   NOTE: derived from the MIT licensed version of mongoose (pre 4.0)
+//
 //   Copyright (c) 2004-2013 Sergey Lyubka
 //   
 //   Permission is hereby granted, free of charge, to any person obtaining a copy

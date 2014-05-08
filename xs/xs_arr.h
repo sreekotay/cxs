@@ -55,11 +55,13 @@ static int      xs_arr_ptrinrange_  (xs_array* ar, void* p, int es)             
 #define         xs_arr_remove(T, ar, before, n)                                                  xs_arr_remove_(&ar,before,n,sizeof(T))
 #define         xs_arr_insert(T, ar, before, ptr, n)                                             xs_arr_insert_(&ar,before,ptr,n,sizeof(T))
 #define         xs_arr_push(T, ar, v)                                                            do{xs_arr_makespace(T,ar,(ar).aCount    +1);xs_arr(T,ar,(ar).aCount++)=v;}while(0)
+#define         xs_arr_pop(T, ar, v)                                                             ((ar).aCount ? ((v=(((T*)((ar).aData))[--(ar).aCount])), 1) : 0)
 #define         xs_arr_count(ar)                                                                 ((ar).aCount)
 #define         xs_arr_space(ar)                                                                 ((ar).aSpace)
 #define         xs_arr_reset(ar)                                                                 (ar).aCount=0
 #define         xs_arr_ptr(T, ar)                                                                ((T*)((ar).aData))
 #define         xs_arr(T, ar, i)                                                                 (((T*)((ar).aData))[i])
+#define         xs_arr_last(T, ar)                                                               (((T*)((ar).aData))[(ar).aCount-1])
 #define         xs_arr_ptrinrange(T, ar, p)                                                      xs_arr_ptrinrange_(&ar,(void*)p,sizeof(T))  
 
 

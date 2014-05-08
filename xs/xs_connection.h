@@ -82,6 +82,7 @@ int                 xs_conn_listen          (xs_conn**, int port, int use_ssl, i
 int                 xs_conn_open            (xs_conn**, const char* host, int port, int use_ssl);
 int                 xs_conn_opensock        (xs_conn**, int sock, int use_ssl);
 int                 xs_conn_error           (const xs_conn*);
+xs_conn*            xs_conn_close           (xs_conn*);
 xs_conn*            xs_conn_destroy         (xs_conn*);
 xs_conn*            xs_conn_inc             (xs_conn*); 
 xs_conn*            xs_conn_dec             (xs_conn*); 
@@ -165,6 +166,7 @@ int                 xs_async_call           (xs_async_connect* xas, int message,
 void                xs_async_stop           (xs_async_connect* );
 int                 xs_async_active         (xs_async_connect* );
 int                 xs_async_print          (xs_async_connect* );
+int                 xs_async_lock           (xs_async_connect* );
 
 //helper functions
 void                xs_async_setuserdata    (xs_async_connect*, void* );
@@ -314,6 +316,7 @@ xs_conn*    xs_conn_inc(xs_conn *conn) {
 }
 xs_conn*    xs_conn_dec(xs_conn *conn) {
     if (conn==0) return 0;
+    if (conn->refcount==0) printf ("sree is a turd\n");
     if (xs_atomic_dec(conn->refcount)<=1)   return xs_conn_destroy(conn);
     return conn;
 }
@@ -1407,6 +1410,7 @@ int xs_async_handler(struct xs_pollfd* xp, int message, int sockfd, int xptoken,
                 conn->cb = cb;
                 //xs_printf ("accept %s\n", xs_sock_addrtostr(str, sizeof(str), &conn->sa)); //debugging
             }
+            xs_conn_inc(conn);
             xs_pollfd_setsocket_userdata(xp, xptoken, conn);
             if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_New, conn);
         break;
@@ -1476,6 +1480,8 @@ int xs_async_print(struct xs_async_connect* xas)                        {return 
 void xs_async_setuserdata(struct xs_async_connect* xas, void* usd)      {if (xas) xas->userdata=usd;}
 void* xs_async_getuserdata(struct xs_async_connect* xas)                {return xas ? xas->userdata : 0;}
 void xs_async_stop(struct xs_async_connect* xas)                        {if (xas) xas->stop=-2;}
+int xs_async_lock (xs_async_connect* xas)                               {return xas&&xas->xp ? xs_pollfd_lock(xas->xp) : -1;}
+
 
 struct xs_async_connect* xs_async_destroy(struct xs_async_connect* xas) {
     int i;
@@ -1525,6 +1531,7 @@ int xs_async_defaulthandler (struct xs_async_connect* xas, int message, xs_conn*
 
     switch (message) {
         case exs_Conn_New:
+            xs_conn_inc(conn);
             break;
 
         case exs_Conn_Read:

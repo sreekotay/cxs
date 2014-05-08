@@ -9,6 +9,8 @@
 #include "xs/xs_logger.h"
 #include "xs/xs_server.h"
 #include "xs/xs_connection.h"
+#include "xs/xs_fileinfo.h"
+#include "xs/xs_json.h"
 
 xs_atomic gcount=0;
 
@@ -46,10 +48,16 @@ int myhandler (struct xs_async_connect* xas, int message, xs_conn* conn) {
 }
 
 int main(int argc, char *argv[]) {
-    int err=0, accesslog=0, i, port = 8080;
+    int err=0, accesslog=0, i, port = 8080, singlethreadaccept = 0;
     xs_server_ctx *ctx;
     xs_async_connect* xas;
     char sslkey[] = "default_webxs_ssl_key.pem";
+    xs_fileinfo fi;
+    xs_json* js;
+    xs_json_tag jt = {0};
+
+    //init all
+    xs_server_init_all (1);
 
     //parse command line
 	for (i=1; i<argc; i++) {
@@ -62,6 +70,9 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i],"-v")==0) {
             printf ("%s\n", xs_server_name());
             exit(1);
+        } else if (strcmp(argv[i],"-s")==0) {
+            xs_logger_info("accept on unique thread");
+            singlethreadaccept = 1;
         } else if (strcmp(argv[i],"-h")==0) {
             printf ("Usage: %s [options]\n    -p port#\n    -a \n\n", xs_server_name());
             exit(1);
@@ -73,15 +84,40 @@ int main(int argc, char *argv[]) {
         accesslog = 1;
     } 
 
+    /*
+    xs_stat ("sample.json", &fi);
+    fi.status = 1;
+    xs_fileinfo_loaddata (&fi, "sample.json");
+    js = xs_json_create ((const char*)fi.data, fi.size);
+    while (xs_json_next (js, &jt)==0) {
+        switch (jt.type) {
+             case exs_JSON_ObjectStart: printf ("{\n");   break;
+             case exs_JSON_ObjectEnd:   printf ("}\n");   break;
+             case exs_JSON_ArrayStart:  printf ("[\n");   break;
+             case exs_JSON_ArrayEnd:    printf ("]\n");   break;
+
+            case exs_JSON_Key:
+                printf ("\"%.*s\" : ", jt.len, jt.ptr);
+                break;
+
+            case exs_JSON_Value:
+                printf ("\"%.*s\"\n", jt.len, jt.ptr);
+                break;
+        }
+    }
+    xs_fileinfo_loaddata (&fi, 0);
+    */
+
+
     //start server and connections
-    xs_server_init_all (1);
     ctx = xs_server_create(".", argv[0]);
     xas = xs_server_xas(ctx); 
     if (accesslog==0) xs_logger_level(exs_Log_Error, exs_Log_Info);
 
     //main server loop
 	xs_server_listen     (ctx, port, myhandler);
-	//xs_server_listen_ssl (ctx, 443,  myhandler, sslkey, sslkey, sslkey);
+	xs_server_listen_ssl (ctx, 443,  myhandler, sslkey, sslkey, sslkey);
+    if (singlethreadaccept) xs_async_lock(xas);
 	while (xs_server_active(ctx)) {
         switch (getc(stdin)) {
             case 's': xs_async_print(xas); break;
@@ -104,4 +140,5 @@ int main(int argc, char *argv[]) {
 #include "xs/xs_logger.h"
 #include "xs/xs_server.h"
 #include "xs/xs_connection.h"
+#include "xs/xs_json.h"
 #undef _xs_IMPLEMENTATION_
