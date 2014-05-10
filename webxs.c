@@ -203,7 +203,7 @@ int do_benchmark (int argc, char *argv[]) {
         char *path = u&&u->path ? u->path : "/100.html";
         port = u&&u->port ? u->port : port;
 
-        if (0) {
+        if (1) {
             xs_conn* conn;
             int err=0, n, rr=1;
             err = xs_conn_open (&conn, host, port, 0);
@@ -222,7 +222,7 @@ int do_benchmark (int argc, char *argv[]) {
                     printf ("=========== header end\n");
                 } else if (n>0) {}//printf ("%.*s", n, buf); //print body
             }
-            xs_conn_dec (conn);
+            xs_conn_destroy (conn);
 
             if (err) {
                 xs_logger_error ("unable to access URL: %d", err);
@@ -238,6 +238,7 @@ int do_benchmark (int argc, char *argv[]) {
         bn->method = "GET";
         bn->path = u&&u->path ? u->path : "/100.html";
         bn->total = gtotaldl;
+        printf ("total %ld\n", (long)gtotaldl);
         if (1) {
             xs_atomic_add(bn->refcount, tc);
 	        for (i=0; i<tc; i++)
