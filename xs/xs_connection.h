@@ -948,7 +948,8 @@ int xs_http_validrequest(const char *buf, int buflen) {
     const char *s=buf, *e=buf+buflen-1;
     int len = 0;
     while (s<e && len==0) {
-        if (!xs_http_okchar(*s))                len = -1; //invalid character
+        if (!xs_http_okchar(*s))
+            len = -1; //invalid character
         else if (s[0]=='\n' && s[1]=='\n')      len = (int)(s - buf) + 2;
         else if (s[0]=='\n' && s+1<e &&  
                  s[1]=='\r' && s[2]=='\n')      len = (int)(s - buf) + 3;
@@ -1037,8 +1038,8 @@ int xs_conn_chunkready(xs_conn * conn) {
 // ==============================================
 size_t xs_conn_httprequest (xs_conn* conn, const char* host, const char* method, const char* path) {
     size_t result;
-    if (conn==0 || method==0 || path==0) {conn->errnum=exs_Error_InvalidRequest; return -50;}
-    if (xs_http_validmethod(method)==0) {conn->errnum=exs_Error_InvalidRequest; return -1;}
+    if (conn==0 || method==0 || path==0)     {conn->errnum=exs_Error_InvalidRequest; return -50;}
+    if (xs_http_validmethod(method)==0)      {conn->errnum=exs_Error_InvalidRequest; return -1;}
     if (host==0) host = conn->host;
     result = xs_conn_printf_header (conn, 
                     "%s %s HTTP/1.1\r\n"
@@ -1626,7 +1627,7 @@ int xs_async_defaulthandler (struct xs_async_connect* xas, int message, xs_conn*
                         break;
                 }
                 if (err) {
-                    if (err==exs_Conn_Close || xs_conn_error(conn)) xs_async_call (xas, err==exs_Conn_Close ? exs_Conn_Close : exs_Conn_Error, conn);   
+                    if (err==exs_Conn_Close || xs_conn_error(conn)) err = xs_async_call (xas, err==exs_Conn_Close ? exs_Conn_Close : exs_Conn_Error, conn);   
                     return err;
                 }
                 err = xs_conn_error(conn);

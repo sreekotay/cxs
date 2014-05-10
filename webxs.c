@@ -184,11 +184,11 @@ int do_benchmark (int argc, char *argv[]) {
 		else if (strcmp(argv[i],"-pipeline")==0)
 			{gpipeline=1;}
 		else if (strcmp(argv[i],"-t")==0)
-			{if (i+1<argc) tc=(int)atof(argv[++i]);}
+			{if (i+1<argc) tc=(int)atoi(argv[++i]);}
 		else if (strcmp(argv[i],"-n")==0)
-			{if (i+1<argc) gtotaldl=(int)atof(argv[++i]);}
+			{if (i+1<argc) gtotaldl=(int)atoi(argv[++i]);}
 		else if (strcmp(argv[i],"-c")==0)
-			{if (i+1<argc) gconcurrent=(int)atof(argv[++i]);}
+			{if (i+1<argc) gconcurrent=(int)atoi(argv[++i]);}
 		else if ((u=xs_uri_destroy(u))==0) {
 			u = xs_uri_create(argv[i], ((argv[i])[0]!='/')*2);
 			xs_logger_info ("target URL: host %s, path %s, port %d\n", u->host?u->host:"none", u->path?u->path:"none", u->port);
@@ -238,7 +238,6 @@ int do_benchmark (int argc, char *argv[]) {
         bn->method = "GET";
         bn->path = u&&u->path ? u->path : "/100.html";
         bn->total = gtotaldl;
-        printf ("total %ld\n", (long)gtotaldl);
         if (1) {
             xs_atomic_add(bn->refcount, tc);
 	        for (i=0; i<tc; i++)
