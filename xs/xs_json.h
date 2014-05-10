@@ -67,11 +67,11 @@ int			xs_json_escape		(char* dst, int dlen, const char* src, int slen);	//for wr
 #define _xs_IMPLEMENTATION_
 
 
-typedef struct xs_json {
+struct xs_json {
     char	*mptr, *msrc, *mend;
     int		mstate;
     xs_arr	mstack;
-} xs_json;
+};
 
 
 // =================================================================================================================
