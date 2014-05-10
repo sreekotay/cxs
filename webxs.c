@@ -299,7 +299,7 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
                 if ((bn->total<10 || (bncount%(bn->total/10))==0) && bncount) xs_logger_info ("progress... %ld", bncount);
                 if (err==0) n   = xs_conn_httprequest (conn, bn->host, bn->method, bn->path);
                 if (err==0) err = xs_conn_error(conn);
-                if (err==0) n   = xs_conn_header_done (conn, 0);
+                n               = xs_conn_header_done (conn, 0);
                 if (err==0) err = xs_conn_error(conn);
                 if (err)
                     err=err;
