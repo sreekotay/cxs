@@ -90,6 +90,10 @@ static int pthread_cancel(pthread_t th) {
     return 0;
 }
 
+static int pthread_join(pthread_t th, void **vptr) {
+    return WaitForSingleObject (th, INFINITE);
+}
+
 static int pthread_mutex_init(pthread_mutex_t *mutex, void *unused) { 
     unused;
     *mutex = CreateMutex (0, 0, 0);

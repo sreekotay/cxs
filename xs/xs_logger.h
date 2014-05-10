@@ -178,6 +178,7 @@ int xs_log_flush(xs_log* log, char needLock) {
 int xs_log_destroy(xs_log* log) {
     xs_log_flush(log, 1);
     if (xs_atomic_swap(log->running, 1, 0)==1) {
+        pthread_join (log->flushth, 0);
         pthread_mutex_lock (&log->mutex);
         pthread_mutex_unlock (&log->mutex);
         xs_queue_destroy(&log->q);

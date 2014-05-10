@@ -11,9 +11,9 @@ typedef struct xs_server_ctx        xs_server_ctx;
 // =================================================================================================================
 // function declarations
 // =================================================================================================================
-xs_server_ctx*          xs_server_create            (const char* rel_path, const char* root_path);
-int                     xs_server_listen            (xs_server_ctx* ctx, int port, xs_async_callback cb);
-int                     xs_server_listen_ssl        (xs_server_ctx* ctx, int port, xs_async_callback cb, const char* privateKeyPem, const char* certPem, const char* certChainPem);
+xs_server_ctx*          xs_server_create            (const char* rel_path, const char* root_path, xs_async_callback* p);
+int                     xs_server_listen            (xs_server_ctx* ctx, int port, xs_async_callback* cb);
+int                     xs_server_listen_ssl        (xs_server_ctx* ctx, int port, xs_async_callback* cb, const char* privateKeyPem, const char* certPem, const char* certChainPem);
 int                     xs_server_active            (xs_server_ctx* ctx);       //returns >0 if active
 xs_async_connect*       xs_server_xas               (xs_server_ctx* ctx); 
 xs_server_ctx*          xs_server_stop              (xs_server_ctx* ctx);
@@ -338,6 +338,7 @@ const char *xs_find_mime_type(const char *path) {
 #define O_BINARY 0 
 #endif
 #endif
+int xs_conn_cachepurge (xs_conn* conn); 
 size_t xs_http_writefiledata(xs_conn* conn, const char* path, xs_fileinfo* fdp, size_t rs, size_t re, int blocking) {
     char buf[8192];
     const xs_httpreq* req = xs_conn_getreq(conn);
@@ -675,15 +676,16 @@ void writeq_proc (xs_queue* qs, writeq_data *wqd, void* privateData) {
 // ==================================================
 //  core server mgmt
 // ==================================================
-xs_server_ctx* xs_server_create(const char* rel_path, const char* root_path) {
+xs_server_ctx* xs_server_create(const char* rel_path, const char* root_path, xs_async_callback* p) {
     xs_server_ctx* ctx = (xs_server_ctx*)calloc(sizeof(xs_server_ctx), 1);
-    struct xs_async_connect* xas=xs_async_create(8);
+    struct xs_async_connect* xas=xs_async_create(8, 0);
     xs_strlcpy(ctx->server_name, xs_server_name(), sizeof(ctx->server_name));
     xs_path_setabsolute (ctx->document_root, sizeof(ctx->document_root), rel_path, root_path);
-    xs_queue_create (&ctx->writeq, sizeof(writeq_data), 1024*10, (xs_queue_proc)writeq_proc, NULL);
-    xs_queue_launchthreads (&ctx->writeq, 20, 0);
+    //xs_queue_create (&ctx->writeq, sizeof(writeq_data), 1024*10, (xs_queue_proc)writeq_proc, NULL);
+    //xs_queue_launchthreads (&ctx->writeq, 20, 0);
     xs_async_setuserdata(xas, ctx);
     ctx->xas = xas;
+    xs_async_setcallback (xas, p);
 
     xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
     xs_arr_add (xs_server_ctx*, gserverlist, &ctx, 1); 
@@ -695,15 +697,15 @@ xs_async_connect* xs_server_xas (xs_server_ctx* ctx) {
     return ctx ? ctx->xas : 0;
 }
 
-int xs_server_listen (xs_server_ctx* ctx, int port, xs_async_callback cb) {
+int xs_server_listen (xs_server_ctx* ctx, int port, xs_async_callback* cb) {
     int err;
     xs_conn *conn4=0, *conn6=0;
     if (ctx==0) return -50;
+    if (cb==0 && ctx->xas) cb = xs_async_getcallback (ctx->xas);
 #ifdef USE_IPV6
  	err = xs_conn_listen(&conn6, port, 0, 1);   //v6 socket (done 
     if (err) xs_logger_error ("listen v6 [%d]: %d se:%d", port, err, xs_sock_err());
     ctx->xas = xs_async_listen (ctx->xas, conn6, cb);
-
 #endif
 #if (!defined USE_IPV6) || defined WIN32
     err = xs_conn_listen(&conn4, port, 0, 0);   //v4 socket (redundant on linux)
@@ -713,10 +715,11 @@ int xs_server_listen (xs_server_ctx* ctx, int port, xs_async_callback cb) {
     return conn4 || conn6;
 }
 
-int xs_server_listen_ssl (xs_server_ctx* ctx, int port, xs_async_callback cb, const char* privateKeyPem, const char* certPem, const char* certChainPem) {
+int xs_server_listen_ssl (xs_server_ctx* ctx, int port, xs_async_callback* cb, const char* privateKeyPem, const char* certPem, const char* certChainPem) {
     int err;
     xs_conn *conn4=0, *conn6=0;
     if (ctx==0) return -50;
+    if (cb==0 && ctx->xas) cb = xs_async_getcallback (ctx->xas);
 #ifdef USE_IPV6
  	err = xs_conn_listen(&conn6, port, 1, 1);   //v6 socket (done 
     if (err) xs_logger_error ("listen v6 [%d]: %d se:%d", port, err, xs_sock_err());
