@@ -19,6 +19,7 @@
 #endif //O_BINARY
 #else
 #include <time.h>
+#define __func__ __FUNCTION__
 #endif
 
 #include <stdio.h>
@@ -37,7 +38,7 @@ typedef void* (*xs_thread_proc)(void*);
     #include <windows.h>
     #include <process.h>
     #include <errno.h>
-    typedef HANDLE                 pid_t;
+    #define pid_t                  HANDLE
     typedef HANDLE                 pthread_mutex_t;
     typedef HANDLE                 pthread_t;
     typedef HANDLE                 sem_t;          
@@ -322,7 +323,7 @@ static int xs_poll(struct pollfd *pfdin, int ntotal, int milliseconds) {
         }
     }
     
-    return result;
+     return result;
 }
 
 
@@ -494,7 +495,7 @@ static DIR * opendir(const char *name) {
     attrs = GetFileAttributesW(wpath);
     if (attrs != 0xFFFFFFFF &&
         ((attrs & FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_DIRECTORY)) {
-      (void) wcscat_s (wpath, PATH_MAX, L"\\*");
+      (void) wcscat (wpath, L"\\*");
       dir->handle = FindFirstFileW(wpath, &dir->info);
       dir->result.d_name[0] = '\0';
     } else {

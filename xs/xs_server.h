@@ -20,8 +20,7 @@ xs_server_ctx*          xs_server_stop              (xs_server_ctx* ctx);
 xs_server_ctx*          xs_server_destroy           (xs_server_ctx* ctx);
 
 int                     xs_server_init_all          (int startupstuff);         //setup signal handers, etc
-int                     xs_server_stop_all          (int signal, void *dummy);  //callback for signalling -- (0, 0) is fine
-
+int                     xs_server_stop_all          (int signal, void *dummy);  //callback for signalling -- (0, 0) is fine -- this is internal
 int                     xs_server_terminate_all     ();
 
 
@@ -572,7 +571,7 @@ size_t xs_http_fileresponse(xs_server_ctx* ctx, xs_conn* conn, const char* path,
 
 
     //write body
-    xs_http_setint (xs_conn_getreq(conn), exs_Req_Status, statuscode);
+    //xs_http_setint (xs_conn_getreq(conn), exs_Req_Status, statuscode); //don't set it -- this is for requests only
     if (dobody==1 && (re-rs)!=0) { //note dobody==1 --- allows HEAD requests to specify dobody=2
 #if 0
         FILE* f;
