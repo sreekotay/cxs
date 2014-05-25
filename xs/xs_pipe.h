@@ -5,6 +5,9 @@
 #define _xs_PIPE_H_
 
 
+#define xs_SOCKET_PIPE      //WIN32 only -- allows us to treat pipe as socket on windows
+
+
 // =================================================================================================================
 // function declarations
 // =================================================================================================================
@@ -23,6 +26,7 @@ int xs_pipe_read    (xs_pipe* p, char* buf, int len);
 
 
 
+
 // =================================================================================================================
 //  implementation
 // =================================================================================================================
@@ -31,15 +35,17 @@ int xs_pipe_read    (xs_pipe* p, char* buf, int len);
 #define _xs_PIPE_IMPL_
 
 
-
 int xs_pipe_open(xs_pipe* p) {
-#ifdef WIN32
-    /*
+#if defined WIN32 && defined xs_SOCKET_PIPE
     struct sockaddr_in sa = {0};
-    int len = sizeof(sa);
+    int len = sizeof(sa), sock, a=65535;
+    struct linger linger;
+    linger.l_onoff = 1;
+    linger.l_linger = 1;
 
     memset (p, 0, sizeof(*p));
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+    //sock = socket(AF_INET, SOCK_STREAM, 0);
+    sock = WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, 0);
     if (sock == INVALID_SOCKET) return -1;
 
     sa.sin_family = AF_INET;
@@ -48,7 +54,8 @@ int xs_pipe_open(xs_pipe* p) {
     if (bind(sock, (struct sockaddr*)&sa, sizeof(sa)) == SOCKET_ERROR ||
         listen(sock, SOMAXCONN) ||
         getsockname(sock, (SOCKADDR*)&sa, &len)||
-        (p->w=socket(PF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) {
+        //(p->w=socket(PF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) {
+        (p->w=WSASocket(PF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, 0)) == INVALID_SOCKET) {
         closesocket(sock); 
         return -1;
     }
@@ -59,19 +66,25 @@ int xs_pipe_open(xs_pipe* p) {
         closesocket(sock);
         return -1;
     }
+    /*
+    setsockopt(p->r, SOL_SOCKET, SO_LINGER, (const char *)&linger, sizeof(linger));
+    setsockopt(p->w, SOL_SOCKET, SO_LINGER, (const char *)&linger, sizeof(linger));
+    setsockopt(p->r, SOL_SOCKET, SO_RCVBUF, (const char *)&a ,sizeof(int));
+    setsockopt(p->r, SOL_SOCKET, SO_SNDBUF, (const char *)&a ,sizeof(int));
+    */
     closesocket(sock);
     return 0;
-    */
-    return _pipe((int*)p, 8192, _O_BINARY)
+#elif defined WIN32
+    return _pipe((int*)p, 8192, _O_BINARY);
 #else
     return pipe((int*)p);
 #endif
 }
 
 int xs_pipe_read(xs_pipe* p, char* buf, int len) {
-#ifdef WIN32
+#if defined WIN32 && defined xs_SOCKET_PIPE
     int ret = recv(p->r, buf, len, 0);
-    if (ret<0 && WSAGetLastError()==WSAECONNRESET) return 0;
+    //if (ret<0 && WSAGetLastError()==WSAECONNRESET) return 0;
     return ret;
 #else
     return read(p->r, buf, len);
@@ -79,7 +92,7 @@ int xs_pipe_read(xs_pipe* p, char* buf, int len) {
 }
 
 int xs_pipe_write(xs_pipe* p, char* buf, int len) {
-#ifdef WIN32
+#if defined WIN32 && defined xs_SOCKET_PIPE
     return send(p->w, buf, len, 0);
 #else
     return write(p->w, buf, len);
@@ -87,7 +100,7 @@ int xs_pipe_write(xs_pipe* p, char* buf, int len) {
 }
 
 int xs_pipe_close(xs_pipe* p) {
-#ifdef WIN32
+#if defined WIN32 && defined xs_SOCKET_PIPE
     if (p->w>0) closesocket(p->w);
     if (p->r>0) closesocket(p->r);
 #else

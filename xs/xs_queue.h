@@ -30,9 +30,9 @@ struct xs_queue {
     pthread_mutex_t     mMutex;
     pthread_cond_t      mReady;
     xs_atomic           qDoneCount, qWaitExecCount, qSleepCount, qWakeCount, qOneCount;
-    xs_atomic           qIsRunning, qProcessed;
+    xs_atomic           qIsRunning, qProcessed, qAttempt;
     xs_atomic           qInactive, qRealSleeping, qWorking;
-    xs_atomic           qActive;
+    xs_atomic           qActive, qMaxActive, qCreated;
     xs_threadhandle     watchdogThread;
 
 };
@@ -114,18 +114,19 @@ void xs_queue_destroy(xs_queue* qs) {
 static void xs_queue_pause (xs_queue *qs) {
     xs_atomic_inc           (qs->qSleepCount);
     pthread_mutex_lock      (&qs->mMutex);
-    //printf                ("sleep [%ld]\n", pthread_self());
+    //printf                  ("sleep [%ld]\n", pthread_self());
     xs_atomic_inc           (qs->qInactive);
     xs_atomic_inc           (qs->qRealSleeping);
     //if (qs->qActive-qs->qInactive>(qs->qDepth))
-    if (qs->qActive-qs->qInactive-qs->qWorking>(qs->qDepth) || qs->qDepth==0) {
+    if ((qs->qActive-qs->qInactive-qs->qWorking>(qs->qDepth) || qs->qDepth==0) &&
+        (qs->qProcessed>=qs->qAttempt))   {
         //printf            ("sleep [%ld]\n", pthread_self());
         pthread_cond_wait   (&qs->mReady, &qs->mMutex);  //nothing to do
-        //printf            ("wake [%ld]\n", pthread_self());
+       //printf            ("wake [%ld]\n", pthread_self());
     }   
     xs_atomic_dec           (qs->qInactive);
     xs_atomic_dec           (qs->qRealSleeping);
-    //printf                ("wake [%ld]\n", pthread_self());
+    //printf                  ("wake [%ld]\n", pthread_self());
     pthread_mutex_unlock    (&qs->mMutex);
 }
 
@@ -133,6 +134,7 @@ static void xs_queue_pause (xs_queue *qs) {
 static void xs_queue_resume (xs_queue *qs) {
     if (qs->qInactive==0)   return;
     xs_atomic_inc           (qs->qWakeCount);
+    //printf                  ("signal wake [%ld]\n", pthread_self());
     pthread_mutex_lock      (&qs->mMutex);
     pthread_cond_signal     (&qs->mReady);
     pthread_mutex_unlock    (&qs->mMutex);
@@ -145,12 +147,14 @@ void xs_queue_add (xs_queue* qs, void* data) {
 
 static void* xs_queue_exec(xs_queue* qs); //forward declaration
 void xs_queue_launchthreads (xs_queue* qs, int count, int flags) {
-    int i; 
+    int i = 0; 
     xs_threadhandle th;
     (void)flags;
     qs->qIsRunning = 1;
-    for (i=0; i<count; i++)
-        pthread_create_detached (&th, (xs_thread_proc)xs_queue_exec, qs);
+    for (i=0; i</*count*/0; i++)
+       pthread_create_detached (&th, (xs_thread_proc)xs_queue_exec, qs);
+    qs->qCreated = i;
+    qs->qMaxActive = count;
 }
 
 static void* xs_queue_watchdog_proc (xs_queue* qs) {
@@ -187,10 +191,8 @@ int xs_queue_grow(xs_queue* qs, int space) {
     xs_atomic_inc (qs->qWriteLock);
     xs_atomic_spin (qs->qReadLock);
     data =  qs->qData ? realloc (qs->qData, si) : malloc(si);
-    if (data) {
+    if (data)
         qs->qData = data;
-        //if (qs->qWriteInd>=qs->qSpace)
-    }
     xs_atomic_dec (qs->qWriteLock);
     return 0;
 }
@@ -209,10 +211,12 @@ int xs_queue_push(xs_queue* qs, void* data, char blocking) {
     xs_atomic_inc (qs->qReadLock);
     xs_atomic_dec (qs->qWriteLock);
 #endif
-    while (qs->qDepth+1>=qs->qSpace) {
+    if (blocking) xs_atomic_inc (qs->qAttempt);
+    if (qs->qDepth+1>=qs->qSpace) {
         if (blocking==0) return 1; //busy
-        sched_yield();
-        if (qs->qDepth>=qs->qSpace) sleep(0);
+        xs_atomic_spin (qs->qDepth+1>=qs->qSpace); 
+        //sched_yield();
+        //if (qs->qDepth>=qs->qSpace) sleep(0);
     }
     do {
         wi  = qs->qWriteInd;
@@ -226,18 +230,28 @@ int xs_queue_push(xs_queue* qs, void* data, char blocking) {
     } while (xs_atomic_swap (qs->qWriteInd, wi, nwi)!=wi);
 
     //push it
+    if (blocking==0) xs_atomic_inc (qs->qAttempt);
     memcpy (((char*)qs->qData) + wi*qs->qElemSize, data, qs->qElemSize);
     xs_atomic_spin (xs_atomic_swap(qs->qAvailInd, wi, nwi)!=wi);
 
     //ready for reading
-    xs_atomic_inc(qs->qDepth);
-    if (qs->qActive) {
-        if (qs->qInactive+1==qs->qActive) xs_atomic_inc(qs->qOneCount);
-        if (qs->qInactive+1>=qs->qActive) xs_queue_resume(qs); //all sleeping?
-        else if (qs->qDepth+qs->qWorking>qs->qActive-qs->qInactive) xs_queue_resume(qs); //all sleeping?
-    }
-
     xs_atomic_dec (qs->qReadLock);
+
+    //kick the queue
+    xs_atomic_inc(qs->qDepth);
+    if (qs->qMaxActive) {
+        //if (qs->qDepth*2>=qs->qSpace &&  qs->qCreated<qs->qMaxActive && qs->qCreated==qs->qActive) {
+        if (qs->qInactive==0 && qs->qWorking==qs->qActive && qs->qCreated<qs->qMaxActive && qs->qCreated==qs->qActive) {
+            pthread_t th;
+            xs_atomic qc = xs_atomic_inc (qs->qCreated);
+            printf ("thread create... %d [%d] of %d\n", (int)qc, (int)qs->qActive, (int)qs->qMaxActive);
+            pthread_create_detached (&th, (xs_thread_proc)xs_queue_exec, qs);
+        } else {
+            if (qs->qInactive+1==qs->qActive) xs_atomic_inc(qs->qOneCount);
+            if (qs->qInactive+1>=qs->qActive) xs_queue_resume(qs); //all sleeping?
+            else if (qs->qDepth+qs->qWorking>qs->qActive-qs->qInactive) xs_queue_resume(qs); //all sleeping?
+        }
+    }
     return 0;
 }
 
@@ -291,6 +305,7 @@ static void* xs_queue_exec (xs_queue* qs) {
     }
     //printf ("done..... thread.....\n");
     xs_atomic_dec (qs->qActive);
+    xs_atomic_dec (qs->qCreated);
     return 0;
 }
 

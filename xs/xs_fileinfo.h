@@ -12,7 +12,7 @@ typedef struct xs_fileinfo{
     xs_atomic                   status, readcount;
     time_t                      check_time;
     int                         stat_ret;
-    size_t                      size;
+    size_t                      size, msize;
     time_t                      modification_time, folder_mod;
     int                         is_directory;
     char*                       data;
@@ -176,22 +176,30 @@ int xs_fileinfo_loaddata(xs_fileinfo* fi, const char *path) { //assumes valid xs
     xs_atomic_spin (xs_atomic_swap (fi->status, locallock, 2)!=locallock);
     if (path==0 || fi->size>(size_t)maxsize) {
         printf ("unmap2\n");  fflush(stdout);
-        if (fi->data) {if (_use_MMAP_) munmap (fi->data, fi->size); else free(fi->data);}
+        if (fi->data) {if (_use_MMAP_) munmap (fi->data, fi->msize); else free(fi->data);}
         fi->data = 0;
-    } else if (path && _use_MMAP_==0) {
+    } else if (path && _use_MMAP_==0 && fi->data) {
         fi->data = fi->data ? (char*)realloc(fi->data, fi->size) : (char*)malloc (fi->size);
+    } else if (path && _use_MMAP_ && fi->data) {
+        printf ("unmap4\n");  fflush(stdout);
+        if (fi->data) {if (_use_MMAP_) munmap (fi->data, fi->msize); else free(fi->data);}
+        fi->data = 0;
     }
 
     //still got it?
     if (path && (_use_MMAP_ ? 1 : (fi->data!=0)) && (f=xs_open (path, O_RDONLY|O_BINARY, 0))!=0) {
         //read it
+        //printf ("mmap %s: %ld\n", path, fi->size);
         if (fi->data==0)            fi->data = (char*)mmap (0, fi->size, PROT_READ, MAP_SHARED, f, 0);
         else                        fi->size = read(f, fi->data, fi->size);
         if (fi->data==(char*)-1)    fi->data = 0;
+        fi->msize                   = fi->size;
         close(f);
+        //printf ("data at %.*s\n from [%p] for %d\n", (int)fi->size, fi->data, fi->data, (int)fi->size);
     } else if (fi->data) {
         //error
-        free(fi->data);
+        printf ("unmap5\n");  fflush(stdout);
+        if (fi->data) {if (_use_MMAP_) munmap (fi->data, fi->msize); else free(fi->data);}
         fi->data = 0;
     }
 
@@ -248,7 +256,7 @@ int xs_fileinfo_get(xs_fileinfo** fip, const char *path, int load_data) {
                 xs_path_getdirectory(dirpath, sizeof(dirpath), path);
                 if (xs_fileinfo_get(&fpd, dirpath, 0)==0) {
                     if (fptr->folder_mod == fpd->modification_time) 
-                            fptr->status = 10; //restore
+                        fptr->status = 10; //restore
                     else fptr->folder_mod = fpd->modification_time;
                 } 
             }
@@ -259,6 +267,7 @@ int xs_fileinfo_get(xs_fileinfo** fip, const char *path, int load_data) {
     //update it
     if (xs_atomic_swap (fptr->status, 0, 1)==0) {
         char* olddata = 0;
+        size_t oldsize = 0;
         //get it now - status is 1
         xs_logger_info ("refreshed %s", path);
         (void)xs_stat(path, &tfi); //<--- call "real" stat
@@ -266,14 +275,15 @@ int xs_fileinfo_get(xs_fileinfo** fip, const char *path, int load_data) {
         tfi.status = fptr->status;
         tfi.folder_mod = fptr->folder_mod;
         if (load_data && tfi.modification_time!=fptr->modification_time) {
-            if (fptr->data && _use_MMAP_) {munmap (fptr->data, fptr->size); fptr->data = 0;}
+            if (fptr->data && _use_MMAP_) { printf ("unmap3\n");  fflush(stdout);munmap (fptr->data, fptr->msize); fptr->data = 0;}
             (void)xs_fileinfo_loaddata(&tfi, path);
             olddata = fptr->data;
+            oldsize = fptr->msize;
         } else tfi.data = fptr->data;
         xs_atomic_spin (fptr->readcount);
         *fptr = tfi; //copy
         fptr->status = 10; //status is 10
-        if (olddata) free(olddata);
+        if (olddata) {printf ("unmap6\n");  fflush(stdout); if (_use_MMAP_) munmap(olddata, oldsize); else free(olddata);}
     } else while (fptr->status<10) sched_yield(); //wait for it
 
     return fptr->stat_ret;

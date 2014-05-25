@@ -13,6 +13,8 @@
 #include <sys/time.h>
 #include <netinet/in.h> 
 #include <dirent.h>
+#include <pthread.h>
+#include <semaphore.h>
 #define closesocket(a)             close(a)
 #ifndef O_BINARY
 #define O_BINARY 0 

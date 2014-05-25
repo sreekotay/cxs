@@ -95,6 +95,7 @@
     <ClInclude Include="..\..\xs\xs_pipe.h" />
     <ClInclude Include="..\..\xs\xs_posix_emu.h" />
     <ClInclude Include="..\..\xs\xs_printf.h" />
+    <ClInclude Include="..\..\xs\xs_process.h" />
     <ClInclude Include="..\..\xs\xs_queue.h" />
     <ClInclude Include="..\..\xs\xs_server.h" />
     <ClInclude Include="..\..\xs\xs_sha1.h" />

@@ -1,7 +1,7 @@
 #ifdef WIN32
     #define FD_SETSIZE      1024
     #include <ws2tcpip.h>   //if you want IPv6 on Windows, this has to be first
-    #define sleep           Sleep
+    #define sleep(a)        Sleep((a)*1000)
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +19,8 @@
 int server_handler (struct xs_async_connect* xas, int message, xs_conn* conn);
 int do_benchmark (int argc, char *argv[]);
 void load_redirfile();
+
+void doit();
 
 // =================================================================================================================
 // main
@@ -64,6 +66,8 @@ int main(int argc, char *argv[]) {
 	    xs_server_listen     (ctx, port, 0);
 	    xs_server_listen_ssl (ctx, 443,  0, sslkey, sslkey, sslkey);
         if (singlethreadaccept) xs_async_lock(xas);
+        //doit();
+
 	    while (xs_server_active(ctx)) {sleep(1);} //your app's event loop
 
 	    xs_logger_fatal ("---- done ----");
@@ -79,50 +83,64 @@ int main(int argc, char *argv[]) {
 // =================================================================================================================
 // server code example
 // =================================================================================================================
-xs_atomic gcount=0, gredir=0;
+xs_atomic gcount=0, gocount=0, gredir=0;
 xs_arr gurlarr={0};
 int server_handler (struct xs_async_connect* xas, int message, xs_conn* conn) {
     char buf[1024];
     const char wsmsg[] = "server ready";
 
-    int n, rr=1, err=0;
+    int n, rr=1, err=0, s;
+    xs_httpreq* req;
     switch (message) {
-        case exs_Conn_WSNew:
-            xs_conn_write_websocket(conn, exs_WS_TEXT, wsmsg, strlen(wsmsg), 0);
-            break;
-
-        case exs_Conn_WSRead:
-            //websocket example
+       case exs_Conn_Read:
             while (err==0 && rr) {
                 n = xs_conn_httpread(conn, buf, sizeof(buf)-1, &rr);
+                s = xs_conn_state (conn);
                 err = xs_conn_error (conn);
-                if (n>0) {
-                    xs_conn_write_websocket(conn, exs_WS_TEXT, buf, n, 0);
-                    if (n>=4 && memcmp (buf,"exit",4)==0)
-                        xs_conn_write_websocket (conn, exs_WS_CONNECTION_CLOSE, 0, 0, 0);
+                req = xs_conn_getreq (conn);
+
+                if (err) 
+                    err = exs_Conn_Close;
+                else if (n>=0 && err==0) {
+                    switch (s) {
+                        case exs_Conn_Header:   
+                            //printf ("conn new   %d\n", (int)xs_atomic_inc(gcount));   
+                            break;
+
+                        case exs_Conn_Complete: 
+                            //printf ("conn done  %d\n", (int)xs_atomic_inc(gocount));  
+                            if (xs_arr_count(gurlarr)) {
+                                int w = xs_atomic_inc(gredir)%xs_arr_count(gurlarr);
+                                char str[1024];
+                                xs_json_tag* jt = xs_arr_ptr(xs_json_tag, gurlarr) + w;
+                                xs_sprintf (str, sizeof(str), "Moved\r\nLocation: %.*s", jt->len, jt->ptr);
+                                xs_conn_write_httperror (conn, 302, str, "");
+                                xs_conn_httplogaccess(conn,0);
+                                //xs_conn_dec(conn);
+                                err = exs_Conn_Close;
+                            } else {
+                                err = xs_server_handlerequest ((xs_server_ctx*)xs_async_getuserdata (xas), conn);
+                                if (xs_http_getint(req, exs_Req_KeepAlive)==0)
+                                    err = exs_Conn_Close;
+                            }
+                            break;
+
+                        case exs_Conn_WSNew:
+                            xs_conn_write_websocket(conn, exs_WS_TEXT, wsmsg, strlen(wsmsg), 0);
+                            break;
+
+                        case exs_Conn_WSFrameEnd:
+                        case exs_Conn_WSFrameRead:
+                            if (n) xs_conn_write_websocket(conn, exs_WS_TEXT, buf, n, 0);
+                            if (n>=4 && memcmp (buf,"exit",4)==0)
+                                xs_conn_write_websocket (conn, exs_WS_CONNECTION_CLOSE, 0, 0, 0);
+                            break;
+                    }
                 }
             }
-            break;
-
-        //http request
-        /*
-        case exs_Conn_HTTPNew:          printf ("conn new  %d\n", (int)xs_atomic_inc(gcount));  break;
-        case exs_Conn_HTTPComplete:     printf ("conn done %d\n", (int)xs_atomic_inc(gcount));  break;
-        */
-        case exs_Conn_HTTPComplete:
-            if (xs_arr_count(gurlarr)) {
-                int w = xs_atomic_inc(gredir)%xs_arr_count(gurlarr);
-                char str[1024];
-                xs_json_tag* jt = xs_arr_ptr(xs_json_tag, gurlarr) + w;
-                xs_sprintf (str, sizeof(str), "Moved\r\nLocation: %.*s", jt->len, jt->ptr);
-                xs_conn_write_httperror (conn, 302, str, "");
-                xs_conn_httplogaccess(conn,0);
-                //xs_conn_dec(conn);
-                return exs_Conn_Close;
-            }
-            break;
+        break;
     }
-    return xs_async_defaulthandler (xas, message, conn);
+    return err;
 }
 
 void load_redirfile() {
@@ -198,7 +216,7 @@ int do_benchmark (int argc, char *argv[]) {
     //launch connects
     if (1) {
         char buf[1024], *ptr;
-        char method[] = "GET";
+        char method[] = "GET";  
         char* host = u&&u->host ? u->host : "127.0.0.1";
         char *path = u&&u->path ? u->path : "/100.html";
         port = u&&u->port ? u->port : port;
@@ -261,12 +279,39 @@ int do_benchmark (int argc, char *argv[]) {
 
 clock_t gtime=0;
 xs_atomic gretry=0;
+int perform_get(bench* bn, xs_conn* conn) {
+    int err=0, n;
+    xs_atomic bncount, dncount = xs_atomic_inc(bn->donecount)+1;
+    while ((bncount=xs_atomic_inc(bn->count)+1)<bn->total) {
+        if (bncount==100)
+            bncount=100;
+        if ((bn->total<10 || (bncount%(bn->total/10))==0) && bncount) xs_logger_info ("progress... %ld", bncount);
+        if (err==0) n   = xs_conn_httprequest (conn, bn->host, bn->method, bn->path);
+        if (err==0) err = xs_conn_error(conn);
+        if (err==0) n   = xs_conn_header_done (conn, 0);
+        if (err==0) err = xs_conn_error(conn);
+        if (err)
+            err=err;
+        if (gpipeline==0) break;
+        if (err) {xs_atomic_dec(bn->count); break;}
+    }  
+    if (err) xs_logger_error ("error %d -- conn error%d", err, xs_conn_error(conn));
+    if (dncount>=bn->total) {
+        double t = ((double)(clock() - gtime))/CLOCKS_PER_SEC; 
+        if (dncount==bn->total) {
+            xs_logger_info ("count %ld time %ld", (long)dncount, (long)(t*1000));
+            xs_logger_info ("requests per second: %ld   bytes: %ld", (long)(dncount/t+.5), (long)gbytes);
+        }
+        err = exs_Conn_Close;
+    }
+
+    return err;
+}
 int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
     char buf[1024];
     const char wsmsg[] = "server ready";
-    int n, rr=1, err=0;
+    int n, rr=1, err=0, s;
     bench* bn = (bench*)xs_async_getuserdata (xas);
-    xs_atomic bncount, dncount;
 
     if (bn)
     switch (message) {
@@ -274,50 +319,26 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
             if (bn->count==0) gtime = clock();
             xs_atomic_dec(bn->donecount);
             xs_atomic_dec(bn->count);
-            xs_async_call(xas, exs_Conn_HTTPComplete, conn);
+            err = perform_get(bn, conn); 
+            if (err) xs_async_stop(xas);
             xs_atomic_inc(bn->concurrent);
             break;
 
-        case exs_Conn_HTTPRead:
+        case exs_Conn_Read:
             while (err==0 && rr) {
                 n = xs_conn_httpread(conn, buf, sizeof(buf)-1, &rr);
                 err = xs_conn_error (conn);
+                s = xs_conn_state(conn);
                 if (n>0) xs_atomic_add(gbytes, n);
-                if (rr && xs_conn_state(conn)==exs_Conn_Complete) {
-                    err = xs_async_call(xas, exs_Conn_HTTPComplete, conn);
-                    if (err) break;
+
+                if (err) err = exs_Conn_Close;
+                else if (s==exs_Conn_Complete) {
+                    err = perform_get(bn, conn); 
+                    if (err) xs_async_stop(xas);
                 }
             }
-            return err ? err : exs_Conn_Handled;
             break;
 
-        case exs_Conn_HTTPComplete:
-            dncount = xs_atomic_inc(bn->donecount)+1;
-            while ((bncount=xs_atomic_inc(bn->count)+1)<bn->total) {
-                if (bncount==100)
-                    bncount=100;
-                if ((bn->total<10 || (bncount%(bn->total/10))==0) && bncount) xs_logger_info ("progress... %ld", bncount);
-                if (err==0) n   = xs_conn_httprequest (conn, bn->host, bn->method, bn->path);
-                if (err==0) err = xs_conn_error(conn);
-                if (err==0) n   = xs_conn_header_done (conn, 0);
-                if (err==0) err = xs_conn_error(conn);
-                if (err)
-                    err=err;
-                if (gpipeline==0) break;
-                if (err) {xs_atomic_dec(bn->count); break;}
-            }  
-            if (err) xs_logger_error ("error %d -- conn error%d", err, xs_conn_error(conn));
-            if (dncount>=bn->total) {
-                double t = ((double)(clock() - gtime))/CLOCKS_PER_SEC; 
-                if (dncount==bn->total) {
-                    xs_logger_info ("count %ld time %ld", (long)dncount, (long)(t*1000));
-                    xs_logger_info ("requests per second: %ld   bytes: %ld", (long)(dncount/t+.5), (long)gbytes);
-                }
-                xs_async_stop(xas);
-                err = exs_Conn_Close;
-                break;
-            }
-            break;
 
         case exs_XAS_Destroy: 
             if (xs_atomic_dec(bn->refcount)<=1) {
@@ -346,7 +367,7 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
     }
 
     if (err) return err;
-    return xs_async_defaulthandler (xas, message, conn);
+    return err;
 }
 
 xs_async_connect* launch_connects(bench* bn, int concurrent) {
@@ -373,4 +394,74 @@ xs_async_connect* launch_connects(bench* bn, int concurrent) {
 #include "xs/xs_server.h"
 #include "xs/xs_connection.h"
 #include "xs/xs_json.h"
+#include "xs/xs_pipe.h"
+#include "xs/xs_process.h"
 #undef _xs_IMPLEMENTATION_
+
+
+
+//simple process test
+/*
+void doit () {
+    xs_pipe pin, pout;
+    pid_t pid;
+    char buf[81920];
+    int n, err;
+    struct pollfd fd[2]={0};
+    xs_pipe_open (&pin);
+    xs_pipe_open (&pout);
+    pid = xs_process_launch (0, "prout", 0, pin.r, pout.w);
+
+    xs_process_closeonexec (pin.r);
+    xs_process_closeonexec (pin.w);
+    xs_process_closeonexec (pout.r);
+    xs_process_closeonexec (pout.w);
+
+    xs_sock_setnonblocking (pin.r, 1);
+    xs_sock_setnonblocking (pin.w, 1);
+    xs_sock_setnonblocking (pout.r, 1);
+    xs_sock_setnonblocking (pout.w, 1);
+#ifndef WIN32
+    (void) closesocket(pin.r);
+    (void) closesocket(pout.w);
+    pin.r = pout.w = -1;
+#endif
+
+#if defined WIN32 && !defined xs_SOCKET_PIPE
+    if (1) {
+        DWORD mode=PIPE_READMODE_BYTE|PIPE_NOWAIT;
+        SetNamedPipeHandleState ((HANDLE)_get_osfhandle (pout.r), &mode, 0, 0);
+    }
+#endif
+
+    fd[0].events = POLLIN | POLLERR;
+    fd[0].fd = pout.r;
+    do {
+#ifdef WIN32
+        DWORD exitcode = 0;
+        if (GetExitCodeProcess(pid, &exitcode)==0 || exitcode!=259)   break;
+#endif
+        if (poll (fd, 1, 10000)) {
+            if (fd[0].revents & (POLLERR|POLLHUP|POLLNVAL)) {printf ("break\n"); break;}
+            if (fd[0].revents & POLLIN)
+            do {
+                printf ("\n................................reading: %d.......................................\n", n);
+
+                n = xs_pipe_read (&pout, buf, sizeof(buf)-1);
+                err = xs_sock_err();
+                if (n<0 && xs_sock_wouldblock(err))//||err==232)  
+                    {n=1; break;}// printf ("waiting...\n"); continue;}
+                if (n>0) {printf ("%.*s", n, buf);}
+                else     {printf ("\ndone n: %d - err: %d\n", n, xs_sock_err()); }
+            
+
+            } while (n>0);
+
+        } else n=1;
+    } while (n>0);
+    printf ("that's all she wrote!!.......................................n:[%d]\n", n);
+    xs_pipe_close (&pin);
+    xs_pipe_close (&pout);
+    return;
+}
+*/

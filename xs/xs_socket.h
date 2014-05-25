@@ -447,7 +447,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
                 xp->pss[i].sid  = fi;
                 xp->pfdMax++;
              #endif
-           }                   
+            }                   
             xp->pfd[i].events   = POLLIN;
             xp->pfd[i].fd       = qs.s;
             xp->pss[i].sa       = qs.sa;
@@ -625,7 +625,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         #else
             for (i=0; i<xp->pfdMax; i++) {
                 if (xp->pss[i].sid!=i) continue;
-                if (xs_sock_invalid(xp->pfd[i].fd)) {
+                if (xs_sock_invalid(xp->pfd[i].fd) || xp->pfd[i].fd==0) {
                     printf ("done %d\n", i);
                     xp->sidmap[xp->pss[i].sid]      = xp->freesid;
                     xp->freesid                     = xp->pss[i].sid;

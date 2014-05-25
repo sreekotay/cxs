@@ -24,7 +24,7 @@ int                     xs_server_stop_all          (int signal, void *dummy);  
 int                     xs_server_terminate_all     ();
 
 
-int                     xs_server_cb                (struct xs_async_connect* xas, int message, xs_conn* conn);
+int                     xs_server_handlerequest     (xs_server_ctx* ctx, xs_conn* conn);
 
 #endif //header
 
@@ -54,7 +54,7 @@ struct xs_server_ctx {
     char server_name[PATH_MAX];
     char document_root[PATH_MAX];
     struct xs_async_connect* xas;
-    xs_queue writeq;
+    //xs_queue writeq;
 };
 
 xs_atomic gserverlistlock=0;
@@ -144,7 +144,7 @@ int xs_dircompare_dd(const xs_fileinfo *a, const xs_fileinfo *b, const char* com
 int xs_dircompare_as(const xs_fileinfo *a, const xs_fileinfo *b, const char* comp) {int c=b->is_directory-a->is_directory; c=c?c:a->size<b->size?-1:(a->size>b->size?1:0); return c?c:xs_dircompare_an(a,b,comp);}
 int xs_dircompare_ds(const xs_fileinfo *a, const xs_fileinfo *b, const char* comp) {int c=b->is_directory-a->is_directory; c=c?c:b->size<a->size?-1:(b->size>a->size?1:0); return c?c:xs_dircompare_dn(a,b,comp);}
 
-size_t xs_http_dirresponse(xs_server_ctx* ctx, xs_conn* conn, const char* origpath, const char* path) {
+size_t xs_http_dirresponse(xs_conn* conn, const char* origpath, const char* path) {
     typedef int (printproc)(xs_conn*, const char *fmt, ...);
     printproc *proc;
     size_t result=0;
@@ -490,7 +490,7 @@ typedef struct writeq_data {
 } writeq_data;
 
 
-size_t xs_http_fileresponse(xs_server_ctx* ctx, xs_conn* conn, const char* path, int dobody) {
+size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* path, int dobody) {
     const xs_httpreq* req = xs_conn_getreq(conn);
     xs_fileinfo fd, *fdp=&fd;
     const char* h, *ver;
@@ -511,7 +511,7 @@ size_t xs_http_fileresponse(xs_server_ctx* ctx, xs_conn* conn, const char* path,
     if (fdp->stat_ret!=0) {
         return xs_conn_write_httperror (conn, 404, "File not found", "Seriously. File not found.\n");
     } else if (fdp->is_directory) {
-        return xs_http_dirresponse (ctx, conn, xs_http_get(req, exs_Req_URI), path);
+        return xs_http_dirresponse (conn, xs_http_get(req, exs_Req_URI), path);
     } else if (0 || xs_http_notmodified(req, fdp)) {
         return xs_conn_write_httperror (conn, 304, "Not Modified", ""); // <---- shortcut out
         statuscode = 304;
@@ -529,10 +529,17 @@ size_t xs_http_fileresponse(xs_server_ctx* ctx, xs_conn* conn, const char* path,
     if (h &&      sscanf(h, "bytes=%" INT64_FMT "-%" INT64_FMT, &rs, &re)==2)   haverangehdr = 1;
     else if (h && sscanf(h, "bytes=%" INT64_FMT "-", &rs)==1)                   haverangehdr = 1;
     else if (h && sscanf(h, "bytes=-%" INT64_FMT, &re)==1)                      haverangehdr = 1;
-    if (h==0 || haverangehdr==0) { //reset
+    if (0 || h==0 || haverangehdr==0) { //reset
         rs = 0;
         re = fdp->size;
-        if (h) xs_logger_warn ("failed to parse range header %s for %s", h, path);
+        if (h) {
+            char* ptr;
+            int n=xs_conn_headerinspect(conn, &ptr);
+            xs_logger_warn ("failed to parse range header %s for %s", h, path);
+            printf ("=========== header start\n");
+            printf ("%.*s", n, ptr);
+            printf ("=========== header end\n");
+        }
     } else if (rs>re || re>fdp->size) { //unsigned, so no need to check if less than 0
         xs_logger_warn ("bad range header %s for %s", h, path);
         result += xs_conn_write_httperror (conn, 400, "Bad Range Request", "Requested bytes %zd-%zd of %zd", rs, re, fdp->size);
@@ -632,7 +639,7 @@ size_t xs_http_fileresponse(xs_server_ctx* ctx, xs_conn* conn, const char* path,
         wqdata.re = re;
         wqdata.path = xs_strdup (path);
         xs_conn_inc(conn);
-        xs_queue_push (&ctx->writeq, &wqdata, 1);
+        xs_async_work (&xas, conn);
 #else
         result += xs_http_writefiledata (conn, path, fdp, (size_t)rs, (size_t)re, 1);
 #endif
@@ -672,6 +679,37 @@ void writeq_proc (xs_queue* qs, writeq_data *wqd, void* privateData) {
 }
 
 
+int xs_server_handlerequest(xs_server_ctx* ctx, xs_conn* conn) {
+    int err=0;
+    xs_httpreq* req  = xs_conn_getreq(conn);
+    const char* h    = xs_http_getint (req, exs_Req_Upgrade) ? 0 : xs_http_get(req, exs_Req_Method);
+
+    //====================
+    // request
+    //====================
+    if (h && (!strcmp(h, "GET") || !strcmp(h, "HEAD"))) {
+        if (0)                         
+            xs_conn_httplogaccess (conn, xs_conn_write_httperror (conn, 200, "OK", "simple"));
+        else if (1) {
+            size_t result;
+            char path[PATH_MAX]="";
+            int n = xs_strappend (path, sizeof(path), ctx->document_root);
+            xs_strlcat (path+n, xs_http_get (req, exs_Req_URI), sizeof(path));
+
+            //xs_conn_write_header (conn, msghdr, sizeof(msghdr)-1);
+            //xs_conn_write (conn, msg, sizeof(msg)-1);
+            result = xs_http_fileresponse (ctx->xas, conn, path, h? *h=='G' : 1); //GET vs HEAD
+            xs_conn_httplogaccess(conn, result);
+        }
+    } else if (h) xs_logger_error ("HTTP method '%s' not handled %s", h ? h : "UNSPECIFIED", xs_conn_getsockaddrstr (conn));
+    if (xs_http_getint(req, exs_Req_KeepAlive)==0) {
+        err = exs_Conn_Close;
+    }
+
+    return err;
+}
+
+
 // ==================================================
 //  core server mgmt
 // ==================================================
@@ -680,8 +718,6 @@ xs_server_ctx* xs_server_create(const char* rel_path, const char* root_path, xs_
     struct xs_async_connect* xas=xs_async_create(8, 0);
     xs_strlcpy(ctx->server_name, xs_server_name(), sizeof(ctx->server_name));
     xs_path_setabsolute (ctx->document_root, sizeof(ctx->document_root), rel_path, root_path);
-    //xs_queue_create (&ctx->writeq, sizeof(writeq_data), 1024*10, (xs_queue_proc)writeq_proc, NULL);
-    //xs_queue_launchthreads (&ctx->writeq, 20, 0);
     xs_async_setuserdata(xas, ctx);
     ctx->xas = xas;
     xs_async_setcallback (xas, p);
