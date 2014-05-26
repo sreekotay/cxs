@@ -43,6 +43,7 @@ int     xs_fileinfo_unloaddata  (xs_fileinfo*  fi);
 #define _xs_FILEINFO_IMPL_
 
 #define _use_MMAP_      1
+#define xfi_printf      //printf
 
 #include "khash.h"
 
@@ -127,10 +128,10 @@ int xs_fileinfo_init() {
 
 void xs_fileinfo_global_lockstatus(int oldstatus, int newstatus) {
    if (newstatus==2) {
-        xs_atomic_spin (xs_atomic_swap(gxs_statwrite,0,1)!=0);
+        xs_atomic_spin_do(xs_atomic_swap(gxs_statwrite,0,1)!=0, xfi_printf ("yield hash\n"));
         //xs_atomic_inc (gxs_statwrite);
         if (oldstatus==1) xs_atomic_dec (gxs_statread);
-        xs_atomic_spin_do(gxs_statread, {});//printf ("yield hash\n"));
+        xs_atomic_spin_do(gxs_statread, xfi_printf ("yield hash\n"));
         return;
     }
     if (oldstatus==2) {
@@ -143,7 +144,7 @@ void xs_fileinfo_global_lockstatus(int oldstatus, int newstatus) {
         return;
     }
     if (oldstatus==0) {
-        xs_atomic_spin_do(gxs_statwrite, {});//printf ("yield file\n"));
+        xs_atomic_spin_do(gxs_statwrite, xfi_printf ("yield file\n"));
         //xs_atomic_spin_do(xs_atomic_swap(gxs_statwrite,0,1)!=0, printf ("yield file\n"));
         //xs_atomic_spin (xs_atomic_swap(gxs_statwrite,0,1)!=0);
         xs_atomic_inc (gxs_statread);
@@ -154,14 +155,14 @@ void xs_fileinfo_global_lockstatus(int oldstatus, int newstatus) {
 
 void xs_fileinfo_lock(xs_fileinfo* fi) {
 #ifndef _old_file_stuff_
-    xs_atomic_spin_do (fi->readcount==0 && fi->status!=10, printf ("yield file\n"));
+    xs_atomic_spin_do (fi->readcount==0 && fi->status!=10, xfi_printf ("yield file\n"));
     xs_atomic_add (fi->readcount, 1);
 #endif
 }
 
 void xs_fileinfo_unlock(xs_fileinfo* fi) {
 #ifndef _old_file_stuff_
-    xs_atomic_spin_do (fi->readcount==0 && fi->status!=10, printf ("yield file\n"));
+    xs_atomic_spin_do (fi->readcount==0 && fi->status!=10, xfi_printf ("yield file\n"));
     xs_atomic_add (fi->readcount, -1);
 #endif
 }
@@ -175,30 +176,30 @@ int xs_fileinfo_loaddata(xs_fileinfo* fi, const char *path) { //assumes valid xs
     //status is 2
     xs_atomic_spin (xs_atomic_swap (fi->status, locallock, 2)!=locallock);
     if (path==0 || fi->size>(size_t)maxsize) {
-        printf ("unmap2\n");  fflush(stdout);
+        xfi_printf ("unmap2\n");
         if (fi->data) {if (_use_MMAP_) munmap (fi->data, fi->msize); else free(fi->data);}
         fi->data = 0;
-    } else if (path && _use_MMAP_==0 && fi->data) {
+    } else if (path && _use_MMAP_==0) {
         fi->data = fi->data ? (char*)realloc(fi->data, fi->size) : (char*)malloc (fi->size);
     } else if (path && _use_MMAP_ && fi->data) {
-        printf ("unmap4\n");  fflush(stdout);
-        if (fi->data) {if (_use_MMAP_) munmap (fi->data, fi->msize); else free(fi->data);}
+        xfi_printf ("unmap4\n");
+        munmap (fi->data, fi->msize);
         fi->data = 0;
     }
 
     //still got it?
     if (path && (_use_MMAP_ ? 1 : (fi->data!=0)) && (f=xs_open (path, O_RDONLY|O_BINARY, 0))!=0) {
         //read it
-        //printf ("mmap %s: %ld\n", path, fi->size);
+        xfi_printf ("mmap %s: %ld\n", path, fi->size);
         if (fi->data==0)            fi->data = (char*)mmap (0, fi->size, PROT_READ, MAP_SHARED, f, 0);
         else                        fi->size = read(f, fi->data, fi->size);
         if (fi->data==(char*)-1)    fi->data = 0;
         fi->msize                   = fi->size;
         close(f);
-        //printf ("data at %.*s\n from [%p] for %d\n", (int)fi->size, fi->data, fi->data, (int)fi->size);
+        xfi_printf ("data at %.*s\n from [%p] for %d\n", (int)fi->size, fi->data, fi->data, (int)fi->size);
     } else if (fi->data) {
         //error
-        printf ("unmap5\n");  fflush(stdout);
+        xfi_printf ("unmap5\n");
         if (fi->data) {if (_use_MMAP_) munmap (fi->data, fi->msize); else free(fi->data);}
         fi->data = 0;
     }
@@ -275,7 +276,7 @@ int xs_fileinfo_get(xs_fileinfo** fip, const char *path, int load_data) {
         tfi.status = fptr->status;
         tfi.folder_mod = fptr->folder_mod;
         if (load_data && tfi.modification_time!=fptr->modification_time) {
-            if (fptr->data && _use_MMAP_) { printf ("unmap3\n");  fflush(stdout);munmap (fptr->data, fptr->msize); fptr->data = 0;}
+            if (fptr->data && _use_MMAP_) { xfi_printf ("unmap3\n"); munmap (fptr->data, fptr->msize); fptr->data = 0;}
             (void)xs_fileinfo_loaddata(&tfi, path);
             olddata = fptr->data;
             oldsize = fptr->msize;
@@ -283,7 +284,7 @@ int xs_fileinfo_get(xs_fileinfo** fip, const char *path, int load_data) {
         xs_atomic_spin (fptr->readcount);
         *fptr = tfi; //copy
         fptr->status = 10; //status is 10
-        if (olddata) {printf ("unmap6\n");  fflush(stdout); if (_use_MMAP_) munmap(olddata, oldsize); else free(olddata);}
+        if (olddata) {xfi_printf ("unmap6\n"); if (_use_MMAP_) munmap(olddata, oldsize); else free(olddata);}
     } else while (fptr->status<10) sched_yield(); //wait for it
 
     return fptr->stat_ret;

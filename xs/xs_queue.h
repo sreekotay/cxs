@@ -244,7 +244,7 @@ int xs_queue_push(xs_queue* qs, void* data, char blocking) {
         if (qs->qInactive==0 && qs->qWorking==qs->qActive && qs->qCreated<qs->qMaxActive && qs->qCreated==qs->qActive) {
             pthread_t th;
             xs_atomic qc = xs_atomic_inc (qs->qCreated);
-            printf ("thread create... %d [%d] of %d\n", (int)qc, (int)qs->qActive, (int)qs->qMaxActive);
+            //printf ("thread create... %d [%d] of %d\n", (int)qc, (int)qs->qActive, (int)qs->qMaxActive);
             pthread_create_detached (&th, (xs_thread_proc)xs_queue_exec, qs);
         } else {
             if (qs->qInactive+1==qs->qActive) xs_atomic_inc(qs->qOneCount);

@@ -1588,7 +1588,7 @@ int xs_async_print(struct xs_async_connect* xas)                        {return 
 void xs_async_setuserdata(struct xs_async_connect* xas, void* usd)      {if (xas) xas->userdata=usd;}
 void* xs_async_getuserdata(struct xs_async_connect* xas)                {return xas ? xas->userdata : 0;}
 xs_async_callback* xs_async_getcallback(xs_async_connect* xas)          {return xas ? xas->cb : 0;}
-int xs_async_call (xs_async_connect* xas, int message, xs_conn* conn)   {return xas&&conn ? (*conn->cb) (xas, message, conn) : 0;}
+int xs_async_call (xs_async_connect* xas, int message, xs_conn* conn)   {return xas&&conn ? (*conn->cb) (xas, message, conn) : (xas&&xas->cb ? (*xas->cb)(xas, message,0) : 0);}
 void xs_async_setcallback(xs_async_connect* xas, xs_async_callback* p)  {if (xas) xas->cb=p;}
 void xs_async_stop(struct xs_async_connect* xas)                        {if (xas&&xas->stop==0) {xas->stop=-2; xs_async_call(xas,exs_XAS_Destroy,0);}}
 int xs_async_lock (xs_async_connect* xas)                               {return xas&&xas->xp ? xs_pollfd_lock(xas->xp) : -1;}
