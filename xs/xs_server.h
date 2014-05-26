@@ -691,15 +691,14 @@ int xs_server_handlerequest(xs_server_ctx* ctx, xs_conn* conn) {
         if (0)                         
             xs_conn_httplogaccess (conn, xs_conn_write_httperror (conn, 200, "OK", "simple"));
         else if (1) {
-            size_t result;
             char path[PATH_MAX]="";
             int n = xs_strappend (path, sizeof(path), ctx->document_root);
             xs_strlcat (path+n, xs_http_get (req, exs_Req_URI), sizeof(path));
 
             //xs_conn_write_header (conn, msghdr, sizeof(msghdr)-1);
             //xs_conn_write (conn, msg, sizeof(msg)-1);
-            result = xs_http_fileresponse (ctx->xas, conn, path, h? *h=='G' : 1); //GET vs HEAD
-            xs_conn_httplogaccess(conn, result);
+            xs_conn_httplogaccess
+                (conn, xs_http_fileresponse (ctx->xas, conn, path, h? *h=='G' : 1)); //GET vs HEAD
         }
     } else if (h) xs_logger_error ("HTTP method '%s' not handled %s", h ? h : "UNSPECIFIED", xs_conn_getsockaddrstr (conn));
     if (xs_http_getint(req, exs_Req_KeepAlive)==0) {

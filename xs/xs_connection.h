@@ -33,6 +33,7 @@ enum {
     exs_Conn_Close,
     exs_Conn_Idle,
     exs_Conn_Work,
+    exs_XAS_Create,             //destruction of async object
     exs_XAS_Destroy,            //destruction of async object
 
     
@@ -606,12 +607,13 @@ size_t xs_conn_write_httperror (xs_conn* conn, int statuscode, const char* descr
         "Content-Length: %d\r\n"
         "Connection: %s\r\n"
         "Server: %s\r\n"
-        "Date: %s\r\n",
+        "Date: %s\r\n"
+        "\r\n",
         ver ? ver : "1.0", statuscode, description, result, 
         (xs_http_getint(xs_conn_getreq(conn), exs_Req_KeepAlive)) ? "keep-alive" : "close",
         xs_server_name(), xs_timestr_now());
     //if (wt&&xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-    xs_conn_header_done(conn, body && *body);
+    //xs_conn_header_done(conn, body && *body); //already taken care of
 
     if (body && *body) {
         va_copy(ap_copy, apin);
@@ -1158,8 +1160,10 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
         s = exs_Conn_LastState;     //not a real state ---> force state transition
     } else if (s==exs_Conn_Header && req->header) {
         req->header = 0;            //clear the "header" fake state
-        if (reread) *reread=(conn->datalen>conn->consumed);
-        return 0;
+        if (_xschr_retvalue_==0) {  //only return if we now would have a new state...
+            if (reread) *reread=(conn->datalen>conn->consumed);
+            return 0;
+        }
     }
 
     //validating state machine assumptions above
@@ -1271,7 +1275,8 @@ int xs_conn_httplogaccess (xs_conn* conn, size_t result) {
 // ==============================================
 char xs_conn_writable (xs_conn* conn){
     int sock = conn ? conn->sock : 0;
-    return sock ? ((xs_sock_avail(sock, POLLOUT)&POLLOUT)!=0) : 0;
+    int w = sock ? ((xs_sock_avail(sock, POLLOUT)&POLLOUT)!=0) : 0;
+    return w;
 }
 size_t xs_conn_header_done (xs_conn* conn, int hasBody) {
     return xs_conn_write_ (conn, "\r\n", 2, hasBody ? MSG_MORE : 0);
@@ -1313,7 +1318,7 @@ int xs_conn_cachefill (xs_conn* conn, const void* buf, size_t len, int force) {
             //printf ("--adding %d to %d::%d from ptr [%p]\n", (int)len, (int)xs_arr_count(conn->wcache), (int)xs_arr_space(conn->wcache), buf);
             if (len+xs_arr_count(conn->wcache)>maxcache || 
                 xs_arr_add(char,conn->wcache,(char*)buf, (int)(len))==0) {
-                //printf ("--failed %d to %d::%d\n", (int)len, (int)xs_arr_count(conn->wcache), (int)xs_arr_space(conn->wcache));fflush (stdout);
+                //printf ("--failed %d to %d::%d\n", (int)len, (int)xs_arr_count(conn->wcache), (int)xs_arr_space(conn->wcache));
                 conn->errnum=-108;
                 return 0;
             }
@@ -1573,6 +1578,7 @@ xs_async_connect*  xs_async_create(int hintsize, xs_async_callback* p) {
     if (xas->th==0)             {xs_pollfd_destroy(xas->xp); free(xas); return 0;}
     xs_queue_create             (&xas->q, sizeof(xs_conn**), 1024*10, (xs_queue_proc)xs_async_cb, xas);
     xs_queue_launchthreads      (&xas->q, 20, 0);
+    xs_async_call               (xas, exs_XAS_Create, 0);
 
     return xas;
 }
@@ -1582,8 +1588,9 @@ int xs_async_print(struct xs_async_connect* xas)                        {return 
 void xs_async_setuserdata(struct xs_async_connect* xas, void* usd)      {if (xas) xas->userdata=usd;}
 void* xs_async_getuserdata(struct xs_async_connect* xas)                {return xas ? xas->userdata : 0;}
 xs_async_callback* xs_async_getcallback(xs_async_connect* xas)          {return xas ? xas->cb : 0;}
+int xs_async_call (xs_async_connect* xas, int message, xs_conn* conn)   {return xas&&conn ? (*conn->cb) (xas, message, conn) : 0;}
 void xs_async_setcallback(xs_async_connect* xas, xs_async_callback* p)  {if (xas) xas->cb=p;}
-void xs_async_stop(struct xs_async_connect* xas)                        {if (xas&&xas->stop==0) {xas->stop=-2; if (xas->cb) (*xas->cb)(xas,exs_XAS_Destroy,0);}}
+void xs_async_stop(struct xs_async_connect* xas)                        {if (xas&&xas->stop==0) {xas->stop=-2; xs_async_call(xas,exs_XAS_Destroy,0);}}
 int xs_async_lock (xs_async_connect* xas)                               {return xas&&xas->xp ? xs_pollfd_lock(xas->xp) : -1;}
 
 
@@ -1625,9 +1632,6 @@ struct xs_async_connect*  xs_async_listen(struct xs_async_connect* xas, xs_conn*
     return xas;
 }
 
-int xs_async_call (xs_async_connect* xas, int message, xs_conn* conn){
-    return xas&&conn ? (*conn->cb) (xas, message, conn) : 0;
-}
 
 
 // =================================================================================================================

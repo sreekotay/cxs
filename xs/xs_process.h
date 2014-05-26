@@ -79,19 +79,19 @@ static pid_t xs_process_launch( const char *dir, char *prog,
     si.cb               = sizeof(si);
     si.dwFlags          = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
     si.wShowWindow      = SW_HIDE;
-#ifndef xs_SOCKET_PIPE
-    si.hStdInput        = (HANDLE)_get_osfhandle(pipein);
-    si.hStdOutput       = (HANDLE)_get_osfhandle(pipeout);
-#elif 0
-    DuplicateHandle     (curp, (HANDLE) (pipein),  curp, &si.hStdInput,  0, TRUE, DUPLICATE_SAME_ACCESS);
-    DuplicateHandle     (curp, (HANDLE) (pipeout), curp, &si.hStdOutput, 0, TRUE, DUPLICATE_SAME_ACCESS);
-#elif 1
-    si.hStdInput        = (HANDLE)(pipein);
-    si.hStdOutput       = (HANDLE)(pipeout);
-#else
-    DuplicateHandle     (curp, (HANDLE) _get_osfhandle(pipein),  curp, &si.hStdInput,  0, TRUE, DUPLICATE_SAME_ACCESS);
-    DuplicateHandle     (curp, (HANDLE) _get_osfhandle(pipeout), curp, &si.hStdOutput, 0, TRUE, DUPLICATE_SAME_ACCESS);
-#endif
+    #ifndef xs_SOCKET_PIPE
+        si.hStdInput    = (HANDLE)_get_osfhandle(pipein);
+        si.hStdOutput   = (HANDLE)_get_osfhandle(pipeout);
+    #elif 0
+        DuplicateHandle (curp, (HANDLE) (pipein),  curp, &si.hStdInput,  0, TRUE, DUPLICATE_SAME_ACCESS);
+        DuplicateHandle (curp, (HANDLE) (pipeout), curp, &si.hStdOutput, 0, TRUE, DUPLICATE_SAME_ACCESS);
+    #elif 1
+        si.hStdInput    = (HANDLE)(pipein);
+        si.hStdOutput   = (HANDLE)(pipeout);
+    #else
+        DuplicateHandle (curp, (HANDLE) _get_osfhandle(pipein),  curp, &si.hStdInput,  0, TRUE, DUPLICATE_SAME_ACCESS);
+        DuplicateHandle (curp, (HANDLE) _get_osfhandle(pipeout), curp, &si.hStdOutput, 0, TRUE, DUPLICATE_SAME_ACCESS);
+    #endif
 
     //launch process
     GetFullPathNameA (dir ? dir : ".", sizeof(fulldir), fulldir, NULL);

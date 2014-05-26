@@ -230,7 +230,7 @@ int xs_log_append_str(xs_log* log, int level, const char* str) {
 }
 
 static int xs_logp_cb(void* userdata, const char* buf, int len) {return xs_log_append ((xs_log*)userdata, ((xs_log*)userdata)->ilevel, buf, len);}
-int xs_log_printf_va (xs_log* log, int level, char* fmt, va_list ap) {
+int xs_log_printf_va (xs_log* log, int level, const char* fmt, va_list ap) {
     int result;
     log->ilevel = level;
     result = xs_sprintf_core (xs_logp_cb, (void*)log, 0, 0, fmt, ap);
