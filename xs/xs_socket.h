@@ -10,6 +10,7 @@
 #endif
 #endif //NO_IPV6
 
+
 #ifdef WIN32
 #ifndef FD_SETSIZE
 #define FD_SETSIZE 1024
@@ -28,7 +29,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #endif
-
 
 // =================================================================================================================
 //  interface and functions -- declarations
@@ -82,7 +82,7 @@ int             xs_sock_settimeout              (int sock, int milliseconds);
 int             xs_sock_setnonblocking          (int sock, unsigned long on);
 int             xs_sock_settcpfastopen          (int sockfd);
 int             xs_sock_settcpcork              (int sockfd, int on);
-int             xs_sock_avail                   (int sock, int event);
+int             xs_sock_avail                   (int sock, int inevent);
 int             xs_sock_closeonexec             (int sock);
 char*           xs_sock_addrtostr               (char *buf, size_t len, const xs_sockaddr* sa);
 char            xs_sock_wouldblock              (int err);
@@ -210,6 +210,7 @@ char         xs_pollfd_Processing    (xs_pollfd* xp);
 // =================================================================================================================
 //  external functions implementation
 // =================================================================================================================
+//xs_atomic gscc = 0, gst;
 xs_pollfd*  xs_pollfd_create (xs_pollfd_Proc* proc, int* listening, int listenCount) {
     struct xs_pollfd* xp = (struct xs_pollfd*)calloc(sizeof(struct xs_pollfd), 1);
     int i;
@@ -243,6 +244,7 @@ xs_pollfd*  xs_pollfd_create (xs_pollfd_Proc* proc, int* listening, int listenCo
 #endif
 //#undef HAVE_EPOLL
     xs_logger_counter_add (0, 1);
+    //printf ("counter inc %d\n", (int)xs_atomic_inc(gscc)+1);
     return xp;
 }
 
@@ -267,16 +269,15 @@ int xs_pollfd_lock(xs_pollfd *xp) {
 xs_pollfd*  xs_pollfd_destroy (xs_pollfd* xp) {
     struct xs_pollfd *n, *nn;
     xs_pollfd_stop (xp);
-    while (xp==xp->root && xp->next && xp->running>=0) {
-        xs_pollfd_Wake(xp->next, 0);
-        sched_yield();
-    }
+    if (xp->th) pthread_join (xp->th, 0);
     if (xp==xp->root) {
         n = xp;
         nn = xp->next;
         while ((n=nn)) {
-            n->root = 0;
             nn = n->next;
+            n->root = 0;
+            n->prev = 0;
+            n->next = 0;
             if (n!=xp->root) {
                 n->ctx = 0;
                 xs_pollfd_dec(n);
@@ -284,15 +285,18 @@ xs_pollfd*  xs_pollfd_destroy (xs_pollfd* xp) {
         }
     }
     if (xp->ctx && (xp->root==0 || xp==xp->root)) {
-        if (xp->th) pthread_join (xp->th, 0);
         free (xp->ctx);
         xp->ctx=0;
     }
 
 #ifdef HAVE_EPOLL
     if (xp->epfd)  {close(xp->epfd); xp->epfd=0;}
-#endif    
+#endif  
+    /*
+    printf ("counter dec %d\n", (int)(gst=xs_atomic_dec(gscc)-1)); fflush (stdout);
     xs_pollfd_Delete(xp);
+    printf ("counter dec done %d\n", (int)gst);  fflush (stdout);
+    */
     free(xp);
     xs_logger_counter_add (0, -1);
     return 0;
@@ -306,30 +310,41 @@ int xs_pollfd_run (xs_pollfd* xp) {
 
 int xs_pollfd_stop (xs_pollfd* inxp) {
     xs_pollfd* xpr = inxp->root;
-    xs_pollfd* xp = xpr ? xpr->next : 0;
+    xs_pollfd* xp = xpr ? xpr->next : 0, *xpn;
     if (xp && xp->running<0) return 0;
+    if (xp==0) {
+        inxp->running = -2;
+        xs_pollfd_Wake (inxp, 0);
+        return 0;
+    }
     while (xp) {
-        if (xp->running>0) {
-            while (xs_atomic_swap (xp->running, 1, -2)!=1 &&
+        xpn = xp->next;
+        if (xp->running>=0) {
+            while (xs_atomic_swap (xp->running, 0, -2)!=0 &&
+                   xs_atomic_swap (xp->running, 1, -2)!=1 &&
                    xs_atomic_swap (xp->running, 2, -2)!=2 &&
                    xs_atomic_swap (xp->running, 3, -2)!=3) { //dead if its "available" or "sleeping"
                 sched_yield(); sleep(0); //wait otherwise...
             }
             xp->running = -2;
         }
-        xp = xp->next;
+        xp = xpn;
     }
     xp = xpr ? xpr->next : 0; 
     while (xp) {
+        xpn = xp->next;
+        assert (xp->running < 0);
         xs_pollfd_Wake (xp, 0); //kick it
-        if (xp->th) pthread_join (xp->th, 0);
-        xp = xp->next;
+        //printf ("xp stop [0x%p] %d\n", (int)xp, (int)xp->running);
+        xp = xpn;
     }
-    if (xpr) xpr->running = -2;
-    if (xpr) xs_pollfd_Wake (xpr, 0);
     if (xpr && xpr->ctx) {
-        xs_atomic_spin(xs_atomic_swap(xpr->ctx->expandlock, 0, 2)==0);
+        xs_atomic_spin (xs_atomic_swap(xpr->ctx->expandlock, 0, 2)!=0 && xpr->ctx->expandlock!=2);
         xs_pollfd_Clean (xpr);
+    }
+    if (xpr==inxp) {
+        xpr->running = -2;
+        xs_pollfd_Wake (xpr, 0);
     }
     return 0;
 }
@@ -408,9 +423,6 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
     time_t ct=0, pt=0; 
     xs_queue* qp = &xp->ctx->acceptqueue;
     struct xs_queuesock qs={0};
-#ifdef HAVE_EPOLL
-    struct epoll_event* eevents = calloc(xp->pfdTotal, 1);
-#endif
     int rret = 0;
     xs_pollfd_Proc* cbproc = xp->ctx->proc;
     xs_pollfd_inc (xp);
@@ -437,16 +449,9 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
                 fi              = xp->freesid;
                 assert (fi>=0 && fi<xp->pfdTotal);
                 xp->freesid     = xp->sidmap[fi];
-             #ifdef HAVE_EPOLL
-                i               = fi;
-                xp->sidmap[fi]  = i;
-                xp->pss[i].sid  = fi;
-                printf ("over\n");
-             #else
                 xp->sidmap[fi]  = i;
                 xp->pss[i].sid  = fi;
                 xp->pfdMax++;
-             #endif
             }                   
             xp->pfd[i].events   = POLLIN;
             xp->pfd[i].fd       = qs.s;
@@ -456,17 +461,6 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
             (*cbproc) (xp, exs_pollfd_New, qs.s, xp->pss[i].sid, qs.userdata);
             if (qs.listener==0) {}//(*cbproc) (xp, exs_pollfd_New, qs.s, xp->pss[i].sid, qs.userdata);
             else xp->pss[i].cfd = (struct xs_Connfd*)qs.userdata;
-        #ifdef HAVE_EPOLL
-            if (xp->epfd) {
-                struct epoll_event epd = {0};
-                epd.events = xp->pfd[i].events;
-                epd.data.u32 = fi;
-                printf ("add %d: sock[%d]\n", i, xp->pfd[i].fd);
-                epoll_ctl (xp->epfd, EPOLL_CTL_ADD, xp->pfd[i].fd, &epd);
-            }
-        #else
-            assert (xp->pfdMax==xp->pfdCount);
-        #endif
             xs_pollfd_setrunning(xp, 1);
             rret = 1; //need this if its a "while"
         }
@@ -493,46 +487,24 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         xs_pollfd_setrunning(xp, 3);
         (void)(*cbproc) (xp, exs_pollfd_Idle, 0, -1, 0);
         xs_pollfd_setrunning(xp, 1);
-    #ifdef HAVE_EPOLL
-       //printf ("poll %d\n", xp->pfdMax);
-       if (xp->pfdCount)
-            rret = epoll_wait(xp->epfd, eevents, xp->pfdMax, rret||(qp->qDepth&&xp->pfdCount<xp->pfdTotal) ? 0 : 100 + xp->xpi*5);
-        else rret = 0;
-    #else
         rret = poll(xp->pfd, xp->pfdCount, (rret>0)||(qp->qDepth&&(!xs_queue_full(qp))&&xp->pfdCount<xp->pfdTotal) ? 0 : 20 + xp->xpi*10);//(/*xp==xp->root*/xp->xpi<4 ? 20 : 200));
         if (0) {//xp->pfdCount>xp->listenCount && 1) { //for debugging
-            static time_t ct = 0, pt = 0;
-            ct = time(0);
+            static time_t ct, pt = 0; ct = time(0);
             if (ct+1>pt)
                 printf ("rret[%d] = pfd[%d] listen[%d] sockc[%d] queueDepth[%d] xp[0x%lx][%d] tc[%d]\n", rret, 
                 xp->pfdCount, (int)xp->listenCount, (int)xp->sockCount, (int)xp->ctx->acceptqueue.qDepth,
                 (unsigned long)xp, (int)xp->xpi, (int)xp->ctx->threadcount);
             pt=ct;
         }
-    #endif
         if (rret<0) {
             int err = xs_sock_err();
             if (err && xs_sock_wouldblock(err)==0) 
                 err=err;
         }
-        if (0 && rret && xp->pfdCount>xp->listenCount)
-            printf ("rret[%d] = pfd[%d] conncount[%d] qd[%d] xpi[%d] xp[0x%lx][%d] tc[%d]\n", rret, 
-                xp->pfdCount, (int)-1002, (int)qp->qDepth, (int)xp->root->xpi,
-                (unsigned long)xp, (int)xp->xpi, (int)xp->ctx->threadcount);
         xs_pollfd_setrunning(xp, 1);
         if (rret && xp->running>0) {
-        #ifdef HAVE_EPOLL
-            int i, rc;
-            for (rc=0; rc<rret; rc++) {
-                i = xp->sidmap[eevents[rc].data.u32];
-                if (xp->pss[i].sid!=i) {printf ("event on closed socket\n"); continue;}
-
-                assert (xp->pss[i].sid==i && i>=0 && i<xp->pfdMax);
-                xp->pfd[i].revents = eevents[rc].events;
-        #else
             int i, ip;
             for (i=0, ip=0; i<xp->pfdCount; i++) {
-        #endif
                 int sock = xp->pfd[i].fd;
                 assert (xp->sidmap[xp->pss[i].sid]==0 || xp->sidmap[xp->pss[i].sid]==i);
                 if (xs_sock_invalid(xp->pfd[i].fd) || xp->pfd[i].revents&(POLLERR|POLLHUP|POLLNVAL)) {
@@ -550,13 +522,6 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
                         xp->pss[i].cfd = 0; 
                         xp->listenCount--;
                     }
-                #ifdef HAVE_EPOLL
-                    if (0) {
-                        struct epoll_event epd = {0}; 
-                        printf ("delete\n");
-                        epoll_ctl (xp->epfd, EPOLL_CTL_DEL, xp->pfd[i].fd, &epd);
-                    }
-                #endif
                     xs_pollfd_setrunning(xp, 1);
                 } else if (i<xp->listenCount && xp->pfd[i].revents&POLLIN) {
                     // ==========================
@@ -607,7 +572,6 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
                     }
                 }
 
-            #ifndef HAVE_EPOLL
                 xp->pfd[ip]=xp->pfd[i];
                 xp->pss[ip]=xp->pss[i];
                 assert (xp->pss[i].sid>=0 && xp->pss[i].sid<xp->pfdTotal);
@@ -616,36 +580,18 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
                     xp->freesid                     = xp->pss[i].sid;
                 } else xp->sidmap[xp->pss[ip].sid]  = ip;
                 ip += xs_sock_valid(xp->pfd[i].fd);
-            #else
-            #endif
                 if (xp->running<0) break;
             }
-        #ifndef HAVE_EPOLL
             if (xp->running>0) xp->pfdMax=xp->pfdCount=ip;
-        #else
-            for (i=0; i<xp->pfdMax; i++) {
-                if (xp->pss[i].sid!=i) continue;
-                if (xs_sock_invalid(xp->pfd[i].fd) || xp->pfd[i].fd==0) {
-                    printf ("done %d\n", i);
-                    xp->sidmap[xp->pss[i].sid]      = xp->freesid;
-                    xp->freesid                     = xp->pss[i].sid;
-                    xp->pss[i].sid                  = -1;
-                    xp->pfdCount--;
-                }
-            }
-        #endif
         }
 
-        while (xp->running>0 && !(xs_pollfd_Processing(xp))) {
-            //break;
+        while (xp->running>0 && !(xs_pollfd_Processing(xp)))
             xs_pollfd_Sleep(xp);
-        }
     } while (xp->running>0 && xs_pollfd_Processing(xp));
     xs_pollfd_setrunning(xp, -1); //dead
     if (xp->ctx) xs_atomic_dec (xp->ctx->threadcount);
-#ifdef HAVE_EPOLL
-    if (eevents) free(eevents);
-#endif
+
+    //close all open sockets
     if (1) {
         int i;
         for (i=0; i<xp->pfdCount; i++) {
@@ -658,6 +604,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         xp->pfdCount = 0;
     }
     //xs_logger_info ("xp thread exit-- xp[%d]: r[%d] pfdt[%d] of [%d]", (int)xp->xpi, (int)xp->running, (int)xp->pfdCount, (int)xp->pfdTotal);
+    //printf ("counter dec--- %d\n", (int)xp->refcount);
     xs_pollfd_dec (xp);
     return 0;
 }
@@ -744,6 +691,7 @@ xs_pollfd* xs_pollfd_Find(xs_pollfd* xp, int pfdTotal) {
         if (xp) {
             xs_pollfd_Init (xp, root, pfdTotal);
             xs_logger_counter_add (0, 1);
+            //printf ("counter inc %d\n", (int)xs_atomic_inc(gscc)+1);
         }
         //printf ("run reason %d\n", 
     }
@@ -758,7 +706,7 @@ int xs_pollfd_Wake (xs_pollfd* xp, xs_thread_proc proc) {
         xp->running = 1;
         //printf ("run ind:%d size:%d\n", (int)(xp->xpi), (int)xp->root->xpi);
         //if (nxp->th) XS_endthread (nxp->th);
-        if (pthread_create_detached (&xp->th, proc, xp)!=0) {
+        if (pthread_create (&xp->th, 0, proc, xp)!=0) {
             xs_logger_info ("------------------- thread error");
             ret=-1;
         }
@@ -840,7 +788,7 @@ int xs_sock_settcpcork(int sockfd, int on)      {return setsockopt(sockfd, IPPRO
 #endif //_WIN32
 
 
-int xs_sock_avail (int sock, int event) {
+int xs_sock_avail (int sock, int inevent) {
 #if 0
     //$$SREEE - fuck - fixme!!! //crashes with concurrency of 10K on ab - switched to poll version below
     int result=0, revents=0;
@@ -848,10 +796,10 @@ int xs_sock_avail (int sock, int event) {
     struct timeval tv={0};
 
     FD_ZERO(&rset); FD_ZERO(&wset); FD_ZERO(&eset);
-    //return event; //$$SREEE - fuck - fixme!!! //crashes with concurrency of 10K on ab
+    //return inevent; //$$SREEE - fuck - fixme!!! //crashes with concurrency of 10K on ab
 
-    if (event&POLLIN)  FD_SET(sock, &rset);
-    if (event&POLLOUT) FD_SET(sock, &wset);
+    if (inevent&POLLIN)  FD_SET(sock, &rset);
+    if (inevent&POLLOUT) FD_SET(sock, &wset);
     FD_SET(sock, &eset);
     if ((result=select(sock+1, &rset, &wset, &eset, &tv)) > 0) {
         if (FD_ISSET(sock, &rset))  revents |= POLLIN;
@@ -864,7 +812,7 @@ int xs_sock_avail (int sock, int event) {
     int result;
     struct pollfd fd;
     fd.fd = sock;
-    fd.events = event;
+    fd.events = inevent;
     fd.revents = 0;
     result = poll(&fd,1,0);
     if (result) return fd.revents;

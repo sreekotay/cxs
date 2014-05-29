@@ -142,7 +142,7 @@ int xs_log_create(xs_log* log, const char* path) {
     log->echolevel = exs_Log_Info;
     log->running = 1;
     xs_arr_create (log->buffered);
-    pthread_create_detached (&log->flushth, (xs_thread_proc)xs_log_flush_threadproc, log);
+    pthread_create (&log->flushth, 0, (xs_thread_proc)xs_log_flush_threadproc, log);
 
     return 0;
 }
@@ -159,7 +159,8 @@ int xs_log_flush(xs_log* log, char needLock) {
     if (log->running==0) return 0;
     if (needLock) pthread_mutex_lock (&log->mutex);
     xs_atomic_inc (log->flushlock);
-    while (log->memlock) {sched_yield();  printf ("flush write\n");}
+    xs_atomic_spin (log->memlock); 
+    //while (log->memlock) {sched_yield();}//  printf ("flush write\n");}
     ldata.data = xs_arr_ptr(char, log->buffered);
     ldata.count = xs_arr_count(log->buffered);
     ldata.space = xs_arr_space(log->buffered);

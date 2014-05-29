@@ -356,7 +356,7 @@ size_t xs_http_writefiledata(xs_conn* conn, const char* path, xs_fileinfo* fdp, 
             w = xs_conn_write_ (conn, fdp->data+rs+tot, (size_t)w, (tot+w<outtot) ? MSG_MORE : 0);
             if (xs_conn_error(conn)==exs_Error_WriteBusy) {
                 if (blocking==0) return tot; 
-                xs_logger_warn ("blocking socket for write");
+                xs_logger_warn ("blocking socket for write %s", path);
                 xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
                 xs_conn_cachepurge(conn);
             } else if (xs_conn_error (conn) || w<=0) {xs_logger_warn ("write error %zd %d", w, xs_conn_error (conn)); break;}//{if (result==0 && tot==0) tot=w; break;}

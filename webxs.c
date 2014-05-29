@@ -118,6 +118,8 @@ int server_handler (struct xs_async_connect* xas, int message, xs_conn* conn) {
                                 xs_conn_httplogaccess(conn,0);
                                 //xs_conn_dec(conn);
                                 err = exs_Conn_Close;
+                            } else if (0) {
+                                xs_conn_write_httperror (conn, 200, "OK", "xxxxxxxxxx");
                             } else {
                                 err = xs_server_handlerequest ((xs_server_ctx*)xs_async_getuserdata (xas), conn);
                                 if (xs_http_getint(req, exs_Req_KeepAlive)==0)
@@ -182,10 +184,16 @@ int gexit=0;
 typedef struct bench {
     char *host, *method, *path;
     int port;
-    xs_atomic count, donecount, total, bytes, refcount, concurrent, concurrenttotal;
+    xs_atomic count, total, bytes, refcount, concurrent, concurrenttotal;
 } bench;
+typedef struct bench_tl {
+    bench*      bn;
+    xs_atomic   lcount, ltotal;
+
+} bench_tl;
+
 int do_div (int t, int d, int n) {return (t/d) + (n==0 ? t-(t/d)*d: 0);}
-xs_async_connect* launch_connects(bench* bn, int concurrent);
+xs_async_connect* launch_connects(bench* bn, int concurrent, int total);
 
 int do_benchmark (int argc, char *argv[]) {
 	int i, tc=1, port=80;
@@ -223,7 +231,7 @@ int do_benchmark (int argc, char *argv[]) {
 
         if (1) {
             xs_conn* conn;
-            int err=0, n, rr=1;
+            int err=0, n, rr=1, s;
             err = xs_conn_open (&conn, host, port, 0);
             if (err==0) n   = xs_conn_httprequest (conn, host, method, path);
             if (err==0) err = xs_conn_error(conn);
@@ -232,8 +240,9 @@ int do_benchmark (int argc, char *argv[]) {
 
             while (err==0 && xs_conn_state(conn)!=exs_Conn_Complete) {
                 n = xs_conn_httpread (conn, buf, sizeof(buf), &rr);
+                s = xs_conn_state(conn);
                 err = xs_conn_error(conn);
-                if (xs_conn_state(conn)==exs_Conn_Header &&
+                if (s==exs_Conn_Header && n>=0 &&
                     (n=xs_conn_headerinspect(conn, &ptr))>0) {
                     printf ("=========== header start\n");
                     printf ("%.*s", n, ptr);
@@ -259,7 +268,7 @@ int do_benchmark (int argc, char *argv[]) {
         if (1) {
             xs_atomic_add(bn->refcount, tc);
 	        for (i=0; i<tc; i++)
-		        xs_arr_push(xs_async_connect*, xa, launch_connects(bn, do_div(gconcurrent, tc, i)));
+		        xs_arr_push(xs_async_connect*, xa, launch_connects(bn, do_div(gconcurrent, tc, i), do_div(gtotaldl, tc, i)));
         } else gexit=1;
     }
 
@@ -273,19 +282,28 @@ int do_benchmark (int argc, char *argv[]) {
     for (i=0; i<xs_arr_count(xa); i++) {
         xs_async_destroy (xs_arr(xs_async_connect*, xa, i));
     }
+    sleep(1);
     //if (bn) free(bn);
     return 0;
 }
 
 clock_t gtime=0;
 xs_atomic gretry=0;
-int perform_get(bench* bn, xs_conn* conn) {
+int perform_get(bench_tl* btl, xs_conn* conn) {
     int err=0, n;
-    xs_atomic bncount, dncount = xs_atomic_inc(bn->donecount)+1;
+    bench* bn = btl->bn;
+    xs_atomic bncount = -1;
+#if 0
     while ((bncount=xs_atomic_inc(bn->count)+1)<bn->total) {
+#else
+    //printf ("lcount %d   ltotal %d\n", (int)btl->lcount, (int)btl->ltotal);
+    while (xs_atomic_inc(btl->lcount)<=btl->ltotal) {
+        bncount = xs_atomic_inc(bn->count) + 1;
+#endif
         if (bncount==100)
             bncount=100;
-        if ((bn->total<10 || (bncount%(bn->total/10))==0) && bncount) xs_logger_info ("progress... %ld", bncount);
+        if ((bn->total<10 || (bncount%(bn->total/10))==0) && bncount) 
+            xs_logger_info ("progress... %ld", bncount);
         if (err==0) n   = xs_conn_httprequest (conn, bn->host, bn->method, bn->path);
         if (err==0) err = xs_conn_error(conn);
         if (err==0) n   = xs_conn_header_done (conn, 0);
@@ -296,14 +314,15 @@ int perform_get(bench* bn, xs_conn* conn) {
         if (err) {xs_atomic_dec(bn->count); break;}
     }  
     if (err) xs_logger_error ("error %d -- conn error%d", err, xs_conn_error(conn));
-    if (dncount>=bn->total) {
+    if (bncount>=bn->total) {
         double t = ((double)(clock() - gtime))/CLOCKS_PER_SEC; 
-        if (dncount==bn->total) {
-            xs_logger_info ("count %ld time %ld", (long)dncount, (long)(t*1000));
-            xs_logger_info ("requests per second: %ld   bytes: %ld", (long)(dncount/t+.5), (long)gbytes);
+        if (bncount==bn->total) {
+            xs_logger_info ("count %ld time %ld", (long)bncount, (long)(t*1000));
+            xs_logger_info ("requests per second: %ld   bytes: %ld", (long)(bncount/t+.5), (long)gbytes);
         }
         err = exs_Conn_Close;
-    }
+    } else if (bncount<0)
+        err = exs_Conn_Close;
 
     return err;
 }
@@ -311,17 +330,18 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
     char buf[1024];
     const char wsmsg[] = "server ready";
     int n, rr=1, err=0, s;
-    bench* bn = (bench*)xs_async_getuserdata (xas);
+    bench_tl* btl = (bench_tl*)xs_async_getuserdata (xas);
+    bench* bn = btl ? btl->bn : 0;
 
     if (bn)
     switch (message) {
         case exs_Conn_New:
             if (bn->count==0) gtime = clock();
-            xs_atomic_dec(bn->donecount);
             xs_atomic_dec(bn->count);
-            err = perform_get(bn, conn); 
+            xs_atomic_dec(btl->lcount);
+            err = perform_get(btl, conn); 
             if (err) xs_async_stop(xas);
-            xs_atomic_inc(bn->concurrent);
+            else xs_atomic_inc(bn->concurrent);
             break;
 
         case exs_Conn_Read:
@@ -331,9 +351,10 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
                 s = xs_conn_state(conn);
                 if (n>0) xs_atomic_add(gbytes, n);
 
-                if (err) err = exs_Conn_Close;
+                if (err) 
+                    err = exs_Conn_Close;
                 else if (s==exs_Conn_Complete) {
-                    err = perform_get(bn, conn); 
+                    err = perform_get(btl, conn); 
                     if (err) xs_async_stop(xas);
                 }
             }
@@ -370,11 +391,15 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
     return err;
 }
 
-xs_async_connect* launch_connects(bench* bn, int concurrent) {
+xs_async_connect* launch_connects(bench* bn, int concurrent, int total) {
     int err=0, i;
-    xs_async_connect* xas=xs_async_create ((bn->total+concurrent-1)/concurrent, benchmark_cb);
+    xs_async_connect* xas=xs_async_create ((total+concurrent-1)/concurrent, benchmark_cb);
     xs_conn* conn=0;
-    xs_async_setuserdata (xas, bn);
+    bench_tl* btl = calloc(sizeof(bench_tl), 1);
+    btl->bn = bn;
+    btl->ltotal = total;//(bn->total + concurrent - 1) / concurrent;
+    printf ("=============== total per concurrent %d\n", (int) btl->ltotal);
+    xs_async_setuserdata (xas, btl);
     for (i=0; i<concurrent && gexit==0; i++) {
         err = xs_conn_open (&conn, bn->host, bn->port, 0);
         if (err) break;

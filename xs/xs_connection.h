@@ -33,19 +33,12 @@ enum {
     exs_Conn_Close,
     exs_Conn_Idle,
     exs_Conn_Work,
-    exs_XAS_Create,             //destruction of async object
+    exs_XAS_Create,             //creation of async object
     exs_XAS_Destroy,            //destruction of async object
-
-    
-    exs_Conn_HTTPNew,
-    exs_Conn_HTTPRead,
-    exs_Conn_HTTPComplete,
-
-    
-
+    exs_Conn_User               = exs_Conn_New + 1000,
 
     //attribute enums
-    exs_Req_Method              = 1100,
+    exs_Req_Method              = 10000,
     exs_Req_Version,
     exs_Req_URI,
     exs_Req_Query,
@@ -53,6 +46,8 @@ enum {
     exs_Req_Status,
     exs_Req_KeepAlive,
     exs_Req_Upgrade,
+    exs_Req_Counter,
+    exs_Req_Total,
     exs_Req_Opcode,             //websocket only
 
     //websocket opcodes
@@ -80,8 +75,8 @@ enum {
     exs_Error_WS_InvalidSecKey  = -20010,
     exs_Error_Last,
 
-
-    exs_Conn_WSNotMask          = (exs_Conn_WSMask-1) //internal
+    //internal 
+    exs_Conn_WSNotMask          = (exs_Conn_WSMask-1)
 };
 
 
@@ -93,9 +88,9 @@ typedef struct xs_conn xs_conn;
 typedef struct xs_httpreq xs_httpreq;
 
 //manage
-int                 xs_conn_listen          (xs_conn**, int port, int use_ssl, int ipv6);
-int                 xs_conn_open            (xs_conn**, const char* host, int port, int use_ssl);
-int                 xs_conn_opensock        (xs_conn**, int sock, int use_ssl);
+int                 xs_conn_listen          (xs_conn** connp, int port, int use_ssl, int ipv6);
+int                 xs_conn_open            (xs_conn** connp, const char* host, int port, int use_ssl);
+int                 xs_conn_opensock        (xs_conn** connp, int sock, int use_ssl);
 int                 xs_conn_error           (const xs_conn*);
 xs_conn*            xs_conn_close           (xs_conn*);
 xs_conn*            xs_conn_destroy         (xs_conn*);
@@ -106,7 +101,7 @@ xs_atomic           xs_conn_seqinc          (xs_conn*);
 xs_atomic           xs_conn_rcount          (xs_conn*); 
 
 //write functions
-size_t              xs_conn_header_done     (xs_conn*, int hasBody); //very important
+size_t              xs_conn_header_done     (xs_conn*, int hasBody); //very important - must be called after header function
 void                xs_conn_body_done       (xs_conn*);
 char                xs_conn_writable        (xs_conn*);
 char                xs_conn_writeblocked    (xs_conn*);
@@ -123,10 +118,9 @@ int                 xs_conn_write_websocket (xs_conn*, int opcode, const char *d
 size_t              xs_conn_write_httperror (xs_conn*, int statuscode, const char* description, const char* body, ...);
 int                 xs_conn_httplogaccess   (xs_conn*, size_t result);
 
-
-//http request functions                    //note: you must call xs_conn_header_done() afterwards to complete request (..and/or add additional headers first!)
-size_t              xs_conn_httprequest     (xs_conn*, const char* host, const char* method, const char* path); //host=0 is valid -- will use conn host if present
-size_t              xs_conn_httpwebsocket   (xs_conn*, const char* host, const char* path); //host=0 is valid -- will use conn host if present
+//http request functions                    NOTE: you must call xs_conn_header_done() after the functions below     //you may add your own headers first....
+size_t              xs_conn_httprequest     (xs_conn*, const char* host, const char* method, const char* path);     //host=0 is valid -- will use conn host if present
+size_t              xs_conn_httpwebsocket   (xs_conn*, const char* host, const char* path);                         //host=0 is valid -- will use conn host if present
 size_t              xs_conn_followredirect  (xs_conn** reconn, xs_conn* conn, const char* method);
 
 //read functions
@@ -263,6 +257,8 @@ struct xs_conn {
     xs_async_callback*  cb;
     void*               userdata;
     char                sastr[46];
+    int                 token;
+    xs_pollfd*          xp;
 };
 
 struct xs_httpreq {
@@ -270,7 +266,7 @@ struct xs_httpreq {
     int                 reqlen, reqmallocsize;
     union               {char datamask[4]; xsint32 datamask32;};
     time_t              createtime;
-    size_t              contentlen, datawritten, dataout;
+    size_t              contentlen, counter, total;
     size_t              consumed;
     xs_httpreq*         next;
     const char          *uri, *method, *version, *status, *hash, *query;
@@ -293,7 +289,7 @@ const char*  xs_conn_getsockaddrstr (const xs_conn* conn)           {return conn
 const xs_sockaddr* xs_conn_getsockaddr (const xs_conn* conn)        {return conn ? &conn->sa : 0; }
              
 int          xs_conn_cachepurge (xs_conn* conn); //forward declaration
-xs_conn*     xs_conn_create()   {xs_logger_counter_add (1, 1); return (xs_conn*)calloc(sizeof(xs_conn), 1);}
+xs_conn*     xs_conn_create()   {xs_conn* conn; xs_logger_counter_add (1, 1); conn = (xs_conn*)calloc(sizeof(xs_conn), 1); if (conn==0) return 0; conn->token=-1;  return conn;}
 xs_conn*     xs_conn_close(xs_conn *conn) {
     struct xs_httpreq *req, *hold;
     if (conn==0) return 0;
@@ -312,6 +308,7 @@ xs_conn*     xs_conn_close(xs_conn *conn) {
     if (conn->buf)      free (conn->buf);
     if (conn->host)     free (conn->host);
     if (conn->scratch)  free (conn->scratch);
+    if (conn->xp)       {xs_pollfd_dec(conn->xp); conn->xp=0;}
     req = conn->req;
     while (req) {
         hold = req;
@@ -327,6 +324,7 @@ xs_conn*    xs_conn_destroy(xs_conn *conn) {
     if (conn->refcount<=0) {
         free(conn);
         xs_logger_counter_add (1, -1);
+        conn = 0;
     }
     return conn;
 }
@@ -1318,7 +1316,7 @@ int xs_conn_cachefill (xs_conn* conn, const void* buf, size_t len, int force) {
             //printf ("--adding %d to %d::%d from ptr [%p]\n", (int)len, (int)xs_arr_count(conn->wcache), (int)xs_arr_space(conn->wcache), buf);
             if (len+xs_arr_count(conn->wcache)>maxcache || 
                 xs_arr_add(char,conn->wcache,(char*)buf, (int)(len))==0) {
-                //printf ("--failed %d to %d::%d\n", (int)len, (int)xs_arr_count(conn->wcache), (int)xs_arr_space(conn->wcache));
+                xs_logger_error ("CACHE --failed %d add to %d::%d", (int)len, (int)xs_arr_count(conn->wcache), (int)xs_arr_space(conn->wcache));
                 conn->errnum=-108;
                 return 0;
             }
@@ -1473,6 +1471,7 @@ int xs_async_handler(struct xs_pollfd* xp, int message, int sockfd, int xptoken,
     if (xas==0) return -1;
     //if (xas->stop)     xs_pollfd_stop(xp);
 
+    assert (conn==0 || conn->token==xptoken || message==exs_pollfd_New);
     switch (message) {
         case exs_pollfd_New:
             //current userData is from the listening socket -- not current one
@@ -1487,6 +1486,8 @@ int xs_async_handler(struct xs_pollfd* xp, int message, int sockfd, int xptoken,
                 //xs_printf ("accept %s\n", xs_sock_addrtostr(str, sizeof(str), &conn->sa)); //debugging
             }
             xs_conn_inc(conn);
+            conn->token = xptoken;
+            if (conn->xp==0) conn->xp = xs_pollfd_inc(xp);
             xs_pollfd_setsocket_userdata(xp, xptoken, conn);
             if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_New, conn);
         break;
@@ -1545,25 +1546,27 @@ int xs_async_handler(struct xs_pollfd* xp, int message, int sockfd, int xptoken,
 
 void * async_threadproc(struct xs_async_connect* xas) {
     xs_pollfd_run(xas->xp);
-    //xs_pollfd_dec(xas->xp);
-    xs_pollfd_dec(xas->xp);
     return 0;
 }
 
 typedef struct xs_async_workdata {
+    int message;
     xs_conn* conn;
 } xs_async_workdata;
 
 
-void xs_async_cb (xs_queue* qs, xs_conn **conn, xs_async_connect* xas) {
-    if (conn && *conn) {
-        xs_async_call(xas, exs_Conn_Work, *conn);
-        xs_conn_dec(*conn);
+void xs_async_cb (xs_queue* qs, xs_async_workdata *wdp, xs_async_connect* xas) {
+    if (wdp && wdp->conn) {
+        xs_async_call(xas, wdp->message, wdp->conn);
+        xs_conn_dec(wdp->conn);
     }
 }
 
-int xs_async_work (xs_async_connect* xas, xs_conn* conn) {
-    return xs_queue_push (&xas->q, &conn, 1);
+int xs_async_work (xs_async_connect* xas, int message, xs_conn* conn) {
+    xs_async_workdata wd = {message, conn};
+    if (conn==0) return -1;
+    xs_conn_inc(conn);
+    return xs_queue_push (&xas->q, &wd, 1);
 }
 
 xs_async_connect*  xs_async_create(int hintsize, xs_async_callback* p) {
@@ -1574,7 +1577,7 @@ xs_async_connect*  xs_async_create(int hintsize, xs_async_callback* p) {
     xs_pollfd_inc               (xas->xp);
     if (xas->xp==0)             {free(xas); return 0;}
     xs_pollfd_set_userdata      (xas->xp, xas);
-    pthread_create_detached     (&xas->th, (xs_thread_proc)async_threadproc, xas);
+    pthread_create              (&xas->th, 0, (xs_thread_proc)async_threadproc, xas);
     if (xas->th==0)             {xs_pollfd_destroy(xas->xp); free(xas); return 0;}
     xs_queue_create             (&xas->q, sizeof(xs_conn**), 1024*10, (xs_queue_proc)xs_async_cb, xas);
     xs_queue_launchthreads      (&xas->q, 20, 0);
@@ -1598,9 +1601,10 @@ struct xs_async_connect* xs_async_destroy(struct xs_async_connect* xas) {
     int i;
     if (xas==0) return 0;
     xs_async_stop (xas);
-    xas->stop = 1;
     xs_pollfd_stop(xas->xp);
-    pthread_join (xas->th, 0);
+    i = pthread_join (xas->th, 0);
+    xs_pollfd_dec(xas->xp);
+    xs_queue_destroy (&xas->q);
     for (i=0; i<xs_arr_count(xas->conn_arr); i++)
         xs_arr(xs_conn*,xas->conn_arr, i) = xs_conn_dec (xs_arr_ptr(xs_conn*,xas->conn_arr)[i]);
     xs_arr_destroy(xas->conn_arr);

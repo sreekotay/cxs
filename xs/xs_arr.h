@@ -162,7 +162,7 @@ static int xs_ptr_binsearch (const void* basePtr, int count, int es, const void*
         }
 
         //otherwise binary search
-        j           = (int)(((unsigned int)i+(unsigned int)n-1)>>1);
+        j           = (int)(((unsigned int)i-(unsigned int)n+1)>>1) + i;
         guess       = base + j*es;
         k           = compareProc(key, guess, customData);
         if (k==0)   return j;
@@ -232,7 +232,7 @@ static int xs_ptr_qsort(const void *basevoid, int count, int es, xs_ptr_comparep
             //partition
             while (1) {
                 do      i++;
-                while   ((i < limit) && (xs_local_qsort_comp (i, start) > 0));
+                while   ((i <  limit) && (xs_local_qsort_comp (i, start) > 0));
 
                 do      j--;
                 while   ((j >= start) && (xs_local_qsort_comp (j, start) < 0));
