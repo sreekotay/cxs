@@ -56,8 +56,6 @@ static void __cdecl xs_terminate_handler(void) {
 static void __cdecl xs_atexit_handler(void) {
     xs_logger_fatal ("EXIT");
     xs_logger_flush();
-    sleep(1);
-    xs_logger_counter_print();
 }
 
 //from: http://stackoverflow.com/questions/10114711/log-the-reason-for-process-termination-with-c-on-linux

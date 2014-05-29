@@ -92,7 +92,7 @@ int                 xs_conn_listen          (xs_conn** connp, int port, int use_
 int                 xs_conn_open            (xs_conn** connp, const char* host, int port, int use_ssl);
 int                 xs_conn_opensock        (xs_conn** connp, int sock, int use_ssl);
 int                 xs_conn_error           (const xs_conn*);
-xs_conn*            xs_conn_close           (xs_conn*);
+xs_conn*            xs_conn_close           (xs_conn*); //does not free the memory
 xs_conn*            xs_conn_destroy         (xs_conn*);
 xs_conn*            xs_conn_inc             (xs_conn*); 
 xs_conn*            xs_conn_dec             (xs_conn*); 

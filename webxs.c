@@ -282,8 +282,7 @@ int do_benchmark (int argc, char *argv[]) {
     for (i=0; i<xs_arr_count(xa); i++) {
         xs_async_destroy (xs_arr(xs_async_connect*, xa, i));
     }
-    sleep(1);
-    //if (bn) free(bn);
+    if (bn) free(bn);
     return 0;
 }
 
@@ -333,7 +332,8 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
     bench_tl* btl = (bench_tl*)xs_async_getuserdata (xas);
     bench* bn = btl ? btl->bn : 0;
 
-    if (bn)
+    if (bn==0) err = exs_Conn_Close;
+    else
     switch (message) {
         case exs_Conn_New:
             if (bn->count==0) gtime = clock();

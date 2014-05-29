@@ -85,7 +85,13 @@ static int pthread_create_detached (pthread_t* th, void *(*start_routine) (void 
     taarg->proc = start_routine;
     taarg->arg = arg;
     *th=(pthread_t)_beginthread(xs_threadproc_create_stub, 0, taarg);
-    //*th=(pthread_t)_beginthread(start_routine, 0, arg);
+    return th ?  0 : -1;
+}
+static int pthread_create (pthread_t* th, void *attr, void *(*start_routine) (void *), void* arg) {
+    xs_taarg* taarg=(xs_taarg*)malloc(sizeof(xs_taarg));
+    taarg->proc = start_routine;
+    taarg->arg = arg;
+    *th=(pthread_t)_beginthread(xs_threadproc_create_stub, 0, taarg);
     return th ?  0 : -1;
 }
 static int pthread_cancel(pthread_t th) {

@@ -279,12 +279,13 @@ xs_pollfd*  xs_pollfd_destroy (xs_pollfd* xp) {
             n->prev = 0;
             n->next = 0;
             if (n!=xp->root) {
-                n->ctx = 0;
+                if (n->th) pthread_join (n->th, 0);
                 xs_pollfd_dec(n);
+                n->ctx =0;
             }
         }
     }
-    if (xp->ctx && (xp->root==0 || xp==xp->root)) {
+    if (xp->ctx && (/*xp->root==0 || */xp==xp->root)) {
         free (xp->ctx);
         xp->ctx=0;
     }
@@ -466,7 +467,7 @@ void* xs_Pollthread3 (struct xs_pollfd* xp) {
         }
 
         //launch new thread if necessaryp
-        if (xs_atomic_swap (xp->ctx->expandlock, 0, 1)==0) {
+        if (xp->ctx && xs_atomic_swap (xp->ctx->expandlock, 0, 1)==0) {
             if (qp->qDepth) {// && xp==xp->root) {
                 struct xs_pollfd* nxp;
                 int fsize = FD_SETSIZE>>3;
