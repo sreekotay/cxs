@@ -11,14 +11,18 @@ CCFLAGS   := -Os
 //CCFLAGS   := -g -ggdb
 CCPLAGS   := $(CCFLAGS)
 
+#UNAME     := $(shell uname)
+
+#$(info $$UNAME_S is [${UNAME}])
+
 ifeq ($(OS),Windows_NT)
 	LDFLAGS = -lpthread -lws2_32 -lcomdlg32 -static-libgcc
 else 
 	//LDFLAGS   := -lpthread -ldl -lrt -g -ggdb
-	LDFLAGS   := -lpthread -ldl -lrt -flto
+	LDFLAGS   := -lpthread -ldl -flto
 endif
 
-DEADCODESTRIP := -fdata-sections -ffunction-sections -Wl,--gc-sections -Wl,-s
+DEADCODESTRIP := -fdata-sections -ffunction-sections -Wl,-s
 //DEADCODESTRIP := 
 
 

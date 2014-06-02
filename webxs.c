@@ -170,6 +170,7 @@ void load_redirfile() {
                 break;
         }
     }
+    xs_json_destroy(js);
     xs_fileinfo_unlock (fi);
     xs_fileinfo_unloaddata (fi);
     if (err<0) xs_logger_error("json redirect error: %d", err);
