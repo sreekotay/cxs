@@ -363,12 +363,10 @@ static int xs_poll(struct pollfd *pfdin, int ntotal, int milliseconds) {
 // =================================================================================================================
 #if (defined WIN32 || !defined CLOCK_MONOTONIC) && !defined (_xs_TIMECLOCK_H_)
 #define _xs_TIMECLOCK_H_
-#if 0
 struct timespec {
     time_t   tv_sec;        /* seconds */
     long     tv_nsec;       /* nanoseconds */
 };
-#endif
 
 typedef int clockid_t;
 #define CLOCK_MONOTONIC (1)

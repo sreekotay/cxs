@@ -193,9 +193,6 @@ xs_async_callback*  xs_async_getcallback    (xs_async_connect* xas);
 
 
 
-#ifndef MSG_PARTIAL
-#define MSG_PARTIAL 0
-#endif
 
 //leftover
 #ifndef MSG_MORE
