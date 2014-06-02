@@ -102,7 +102,7 @@ void xs_queue_create(xs_queue* qs, int elemSize, int queueSize, xs_queue_proc qP
 
 void xs_queue_destroy(xs_queue* qs) {
     qs->qIsRunning=0;
-    while (qs->qActive || qs->qInactive)    {pthread_cond_broadcast (&qs->mReady); sched_yield();}
+    xs_atomic_spin_do (qs->qActive || qs->qInactive, pthread_cond_broadcast (&qs->mReady));
     pthread_mutex_lock      (&qs->mMutex);
     pthread_mutex_unlock    (&qs->mMutex);
     pthread_mutex_destroy   (&qs->mMutex);
