@@ -359,7 +359,7 @@ size_t xs_http_writefiledata(xs_conn* conn, const char* path, xs_fileinfo* fdp, 
                 xs_logger_warn ("blocking socket for write %s", path);
                 xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
                 xs_conn_cachepurge(conn);
-            } else if (xs_conn_error (conn) || w<=0) {xs_logger_warn ("write error %zd %d", w, xs_conn_error (conn)); break;}//{if (result==0 && tot==0) tot=w; break;}
+            } else if (xs_conn_error (conn) || w<=0) {xs_logger_warn ("write error bytes:%zd. %zd of %zd - err [%d]", w, tot+w, outtot, xs_conn_error (conn)); break;}//{if (result==0 && tot==0) tot=w; break;}
             tot += w;
         } while (tot<outtot);
     } else {
@@ -525,11 +525,12 @@ size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* pa
     re=fdp->size;
 
     //range header check
-    h = xs_http_getheader (req, "Range");
-    if (h &&      sscanf(h, "bytes=%" INT64_FMT "-%" INT64_FMT, &rs, &re)==2)   haverangehdr = 1;
-    else if (h && sscanf(h, "bytes=%" INT64_FMT "-", &rs)==1)                   haverangehdr = 1;
-    else if (h && sscanf(h, "bytes=-%" INT64_FMT, &re)==1)                      haverangehdr = 1;
-    if (0 || h==0 || haverangehdr==0) { //reset
+    if ((h=xs_http_getheader (req, "Range"))) {
+        if (     sscanf(h, "bytes=%" INT64_FMT "-%" INT64_FMT, &rs, &re)==2)   haverangehdr = 1;
+        else if (sscanf(h, "bytes=%" INT64_FMT "-", &rs)==1)                   haverangehdr = 1;
+        else if (sscanf(h, "bytes=-%" INT64_FMT, &re)==1)                      haverangehdr = 1;
+    }
+    if (h==0 || haverangehdr==0) { //reset
         rs = 0;
         re = fdp->size;
         if (h) {
@@ -555,8 +556,6 @@ size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* pa
     if (dohdr) {
         ver = xs_http_get(req, exs_Req_Version);
         if (ver && !strcmp(ver, "1.0")) ver=0;
-        //if (xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-        //xs_timestr(modt, sizeof(modt), &fdp->modification_time);
         xs_conn_printf_header(conn,
             "HTTP/%s %d %s\r\n"
             "Content-Length: %zd\r\n"
@@ -578,60 +577,8 @@ size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* pa
 
 
     //write body
-    //xs_http_setint (xs_conn_getreq(conn), exs_Req_Status, statuscode); //don't set it -- this is for requests only
     if (dobody==1 && (re-rs)!=0) { //note dobody==1 --- allows HEAD requests to specify dobody=2
 #if 0
-        FILE* f;
-        char buf[8192];
-        int amt;
-
-        size_t tot=0, outtot=(size_t)(re-rs), w;
-        if (fdp->data) {
-            //from cache
-            do {
-                w = 256<<10;
-                if (tot+w>outtot) w=outtot-tot;
-                if (xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-                w = xs_conn_write (conn, fdp->data+rs+tot, (size_t)w);
-                if (w<0) break;
-                tot += w;
-            } while (tot<outtot);
-            result += tot;
-        } else {
-            //from file
-            xs_logger_info ("reading file %s", path);
-            f = fopen (path, "rb");
-            if (f) {
-                #ifndef _WIN32
-                fcntl(fileno(f), F_SETFD, FD_CLOEXEC);
-                if (rs) fseek (f, rs, SEEK_SET);
-                #else
-                fseek (f, (size_t)rs, SEEK_SET);
-                #endif
-                do {
-                    w = sizeof(buf);
-                    if (tot+w>outtot) w=outtot-tot;
-                    w = fread (buf, 1, w, f);
-                    if (xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-                    w = xs_conn_write_ (conn, buf, w, (tot+w<outtot) ? MSG_MORE : 0);
-                    if (w<0) break;
-                    tot += w;
-                } while (tot<outtot);
-                fclose (f);
-                result += tot;
-            }  
-        }
-
-        if (sock) xs_sock_setnonblocking(sock, 0);
-    
-        //didn't write data properly
-        if (result!=re-rs) {
-            //shit.
-            if (xs_conn_error(conn)) xs_logger_error ("connection error %d. %lld!=%lld", xs_conn_error(conn), (xsint64)result, (xsint64)(re-rs));
-            xs_http_setint ((xs_httpreq* )req, exs_Req_KeepAlive, 0);
-            xs_http_setint (xs_conn_getreq(conn), exs_Req_Status, 0);
-        }
-#elif 0
         writeq_data wqdata;
         wqdata.seq = xs_conn_seqinc(conn);
         wqdata.conn = conn;
@@ -695,10 +642,9 @@ int xs_server_handlerequest(xs_server_ctx* ctx, xs_conn* conn) {
             int n = xs_strappend (path, sizeof(path), ctx->document_root);
             xs_strlcat (path+n, xs_http_get (req, exs_Req_URI), sizeof(path));
 
-            //xs_conn_write_header (conn, msghdr, sizeof(msghdr)-1);
-            //xs_conn_write (conn, msg, sizeof(msg)-1);
-            xs_conn_httplogaccess
-                (conn, xs_http_fileresponse (ctx->xas, conn, path, h? *h=='G' : 1)); //GET vs HEAD
+            if (0) xs_conn_write_httperror (conn, 200, "OK", "test");
+            else xs_conn_httplogaccess
+                    (conn, xs_http_fileresponse (ctx->xas, conn, path, h? *h=='G' : 1)); //GET vs HEAD
         }
     } else if (h) xs_logger_error ("HTTP method '%s' not handled %s", h ? h : "UNSPECIFIED", xs_conn_getsockaddrstr (conn));
     if (xs_http_getint(req, exs_Req_KeepAlive)==0) {

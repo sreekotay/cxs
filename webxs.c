@@ -152,23 +152,25 @@ void load_redirfile() {
     int err=0;
     xs_fileinfo_get (&fi, "redirect.json", 1);
     xs_fileinfo_lock (fi);
-    js = xs_json_create ((const char*)fi->data, fi->size);
-    while ((err=xs_json_next (js, &jt, 1))==0) {
-        switch (jt.type) {
-             case exs_JSON_ObjectStart: xs_logger_info ("{");   break;
-             case exs_JSON_ObjectEnd:   xs_logger_info ("}");   break;
-             case exs_JSON_ArrayStart:  xs_logger_info ("[");   break;
-             case exs_JSON_ArrayEnd:    xs_logger_info ("]");   break;
+    if (js = xs_json_create ((const char*)fi->data, fi->size)) {
+      while ((err=xs_json_next (js, &jt, 1))==0) { 
+          switch (jt.type) {
+               case exs_JSON_ObjectStart: xs_logger_info ("{");   break;
+               case exs_JSON_ObjectEnd:   xs_logger_info ("}");   break;
+               case exs_JSON_ArrayStart:  xs_logger_info ("[");   break;
+               case exs_JSON_ArrayEnd:    xs_logger_info ("]");   break;
 
-            case exs_JSON_Key:
-                xs_logger_info ("\"%.*s\" : ", jt.len, jt.ptr);
-                break;
+               case exs_JSON_Key:
+                  xs_logger_info ("\"%.*s\" : ", jt.len, jt.ptr);
+                  break;
 
-            case exs_JSON_Value:
-                xs_logger_info ("\"%.*s\"", jt.len, jt.ptr);
-                xs_arr_add(xs_json_tag, gurlarr, &jt, 1);
-                break;
-        }
+               case exs_JSON_Value:
+                  xs_logger_info ("\"%.*s\"", jt.len, jt.ptr);
+                  xs_arr_add(xs_json_tag, gurlarr, &jt, 1);
+                  break;
+          }
+      }
+      xs_json_destroy(js);
     }
     xs_fileinfo_unlock (fi);
     xs_fileinfo_unloaddata (fi);

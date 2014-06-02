@@ -590,37 +590,31 @@ int xs_conn_bufresize(xs_conn* conn) {
 size_t xs_conn_write_httperror (xs_conn* conn, int statuscode, const char* description, const char* body, ...) {
     va_list ap_copy, apin;
     const char* ver;
-    int result = 0;//, sock = 0, wt=0;
+    int result = 0;
     va_start(apin, body);
-    if (body) {
+    if (body && *body) {
         va_copy(ap_copy, apin);
         result = xs_sprintf_va (0, 0, body, ap_copy);
         va_end (ap_copy);
     }
     ver = xs_http_get(xs_conn_getreq(conn), exs_Req_Version);
     if (ver && !strcmp(ver, "1.0")) ver=0;
-    //if (wt&&xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
     xs_conn_printf_header (conn, 
         "HTTP/%s %d %s\r\n"
         "Content-Length: %d\r\n"
         "Connection: %s\r\n"
         "Server: %s\r\n"
-        "Date: %s\r\n"
-        "\r\n",
+        "Date: %s\r\n",
         ver ? ver : "1.0", statuscode, description, result, 
         (xs_http_getint(xs_conn_getreq(conn), exs_Req_KeepAlive)) ? "keep-alive" : "close",
         xs_server_name(), xs_timestr_now());
-    //if (wt&&xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-    //xs_conn_header_done(conn, body && *body); //already taken care of
+    xs_conn_header_done(conn, body && *body); //already taken care of
 
     if (body && *body) {
         va_copy(ap_copy, apin);
-        //if (wt&&xs_conn_writable(conn)==0) xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
         result = xs_conn_printf_va (conn, body, ap_copy);
         va_end (ap_copy);
     }
-    //xs_http_setint (xs_conn_getreq(conn), exs_Req_Status, statuscode); //this isn't right -- $$$SREE
-    //if (sock) xs_sock_setnonblocking(sock, 1);
     return result;
 }
 
@@ -1061,15 +1055,19 @@ size_t xs_conn_httprequest (xs_conn* conn, const char* host, const char* method,
     if (xs_http_validmethod(method)==0)      {conn->errnum=exs_Error_InvalidRequest; return -1;}
     if (host==0) host = conn->host;
     result = xs_conn_printf_header (conn, 
-                    "%s %s HTTP/1.1\r\n"
-                    "Connection: keep-alive\r\n"
-                    "Server: %s\r\n"
-                    "Data: %s\r\n"
-                    "%s%s%s",
-                    method, path, xs_server_name(), xs_timestr_now(),
-                    host ? "Host:" : "",
-                    host ? host : "",
-                    host ? "\r\n" : ""
+                    host ? 
+                        "%s %s HTTP/1.1\r\n"
+                        "Connection: keep-alive\r\n"
+                        "Server: %s\r\n"
+                        "Data: %s\r\n"
+                        "Host: %s \r\n" 
+                    :
+                        "%s %s HTTP/1.1\r\n"
+                        "Connection: keep-alive\r\n"
+                        "Server: %s\r\n"
+                        "Data: %s\r\n",
+                    method, path, xs_server_name(), 
+                    xs_timestr_now(), host
                     );
     xs_strlcpy (conn->method, method, sizeof(conn->method));
     return result;
@@ -1367,7 +1365,8 @@ size_t xs_conn_write_ (xs_conn* conn, const void* buf, size_t len, int flags) {
         if (n!=amt) {
             amt -= (n>0 ? n : 0);
             if (xs_conn_cachefill(conn, (char*)buf + tot, amt, 1)) tot += amt;
-            if (n>0 || xs_conn_seterr(conn)==0) conn->errnum = exs_Error_WriteBusy;
+            if (n>0 || xs_conn_seterr(conn)==0)
+                conn->errnum = exs_Error_WriteBusy;
             break;
         }
     }
@@ -1455,7 +1454,6 @@ int xs_conn_printf_chunked(xs_conn *conn, const char *fmt, ...) {
 struct xs_async_connect {
     pthread_t           th;
     int                 stop;
-    xs_array            conn_arr;
     struct xs_pollfd*   xp;
     void*               userdata;
     xs_async_callback   *cb;
@@ -1509,8 +1507,9 @@ int xs_async_handler(struct xs_pollfd* xp, int message, int sockfd, int xptoken,
 
         case exs_pollfd_Error:
         case exs_pollfd_Delete:
+            if (xs_conn_error(conn)==0) xs_conn_seterr(conn);
             if (cb) err = (*cb) (xas, message==exs_pollfd_Error ? exs_Conn_Error : exs_Conn_Close, conn);
-            if (err!=exs_Conn_Close) {err=exs_Conn_Close;}// conn=xs_conn_dec(conn);}
+            if (err!=exs_Conn_Close) err =exs_Conn_Close;
         break;
     }
 
@@ -1531,6 +1530,7 @@ int xs_async_handler(struct xs_pollfd* xp, int message, int sockfd, int xptoken,
                 //clear the token (after releasing conn)
                 if (conn) {
                     //send error and close msgs, 
+                    if (conn->errnum==0) conn->errnum = exs_Conn_Close;
                     if (message!=exs_pollfd_Error && message!=exs_pollfd_Delete) {
                         if (xs_conn_error(conn)) (*cb) (xas, exs_Conn_Error, conn);
                         (*cb) (xas, exs_Conn_Close, conn);
@@ -1605,9 +1605,6 @@ struct xs_async_connect* xs_async_destroy(struct xs_async_connect* xas) {
     i = pthread_join (xas->th, 0);
     xs_pollfd_dec(xas->xp);
     xs_queue_destroy (&xas->q);
-    for (i=0; i<xs_arr_count(xas->conn_arr); i++)
-        xs_arr(xs_conn*,xas->conn_arr, i) = xs_conn_dec (xs_arr_ptr(xs_conn*,xas->conn_arr)[i]);
-    xs_arr_destroy(xas->conn_arr);
     free(xas);
     return 0;
 }
@@ -1618,9 +1615,7 @@ struct xs_async_connect*  xs_async_read(struct xs_async_connect* xas, xs_conn* c
     if (xas==0) xas = xs_async_create(0, proc);
     if (xas==0) return 0;
     conn->cb = proc;
-    //xs_conn_inc(conn);
     xs_pollfd_push (xas->xp, xs_conn_getsock(conn), conn, 0); 
-    //xs_arr_add (xs_conn*, xas->conn_arr, &conn, 1);
     return xas;
 }
 
@@ -1630,9 +1625,7 @@ struct xs_async_connect*  xs_async_listen(struct xs_async_connect* xas, xs_conn*
     if (xas==0) xas = xs_async_create(0, proc);
     if (xas==0) return 0;
     conn->cb = proc;
-    //xs_conn_inc(conn);
     xs_pollfd_push (xas->xp, xs_conn_getsock(conn), conn, 1); 
-    //xs_arr_add (xs_conn*, xas->conn_arr, &conn, 1);
     return xas;
 }
 
