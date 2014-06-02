@@ -152,7 +152,7 @@ void load_redirfile() {
     int err=0;
     xs_fileinfo_get (&fi, "redirect.json", 1);
     xs_fileinfo_lock (fi);
-    if (js = xs_json_create ((const char*)fi->data, fi->size)) {
+    if ((js = xs_json_create ((const char*)fi->data, fi->size))) {
       while ((err=xs_json_next (js, &jt, 1))==0) { 
           switch (jt.type) {
                case exs_JSON_ObjectStart: xs_logger_info ("{");   break;
