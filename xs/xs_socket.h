@@ -1016,7 +1016,12 @@ int xs_sock_settcpfastopen(int sockfd)          {int hint=5; return setsockopt(s
 #else
 int xs_sock_settcpfastopen(int sockfd)          {return -1;}
 #endif
+
+#ifdef TCP_CORK
 int xs_sock_settcpcork(int sockfd, int on)      {return setsockopt(sockfd, IPPROTO_TCP, TCP_CORK, &on, sizeof(on));}
+#else
+int xs_sock_settcpcork(int sockfd, int on)      {return -1;}
+#endif
 
 #endif //_WIN32
 
