@@ -42,8 +42,8 @@ int     xs_fileinfo_unloaddata  (xs_fileinfo*  fi);
 #ifndef _xs_FILEINFO_IMPL_
 #define _xs_FILEINFO_IMPL_
 
-#define _use_MMAP_      1
-#define xfi_printf(...)      //printf
+#define _use_MMAP_          1
+#define xfi_printf(...)     //printf(...)
 
 #include "khash.h"
 
