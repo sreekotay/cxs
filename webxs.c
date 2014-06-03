@@ -1,5 +1,5 @@
 #ifdef WIN32
-    #define FD_SETSIZE      1024
+    #define FD_SETSIZE      4096
     #include <ws2tcpip.h>   //if you want IPv6 on Windows, this has to be first
     #define sleep(a)        Sleep((a)*1000)
 #endif
@@ -15,6 +15,7 @@
 #include "xs/xs_json.h"
 #include "xs/xs_arr.h"
 #include "xs/xs_printf.h"
+#include "xs/xs_posix_emu.h"
 
 int server_handler (struct xs_async_connect* xas, int message, xs_conn* conn);
 int do_benchmark (int argc, char *argv[]);
@@ -116,7 +117,6 @@ int server_handler (struct xs_async_connect* xas, int message, xs_conn* conn) {
                                 xs_sprintf (str, sizeof(str), "Moved\r\nLocation: %.*s", jt->len, jt->ptr);
                                 xs_conn_write_httperror (conn, 302, str, "");
                                 xs_conn_httplogaccess(conn,0);
-                                //xs_conn_dec(conn);
                                 err = exs_Conn_Close;
                             } else if (0) {
                                 xs_conn_write_httperror (conn, 200, "OK", "xxxxxxxxxx");
@@ -289,26 +289,13 @@ int do_benchmark (int argc, char *argv[]) {
 
 
 double mytime() {
-#ifdef WIN32
-    return clock();
-#else
 	struct timespec ts;
     int err;
     double t;
     err = clock_gettime (CLOCK_REALTIME, &ts);
     t = ts.tv_sec + ts.tv_nsec * 1e-9;
     return t;
-#endif
 }
-
-double mytimediv() {
-#ifdef WIN32
-    return CLOCKS_PER_SEC;
-#else
-    return 1;
-#endif
-}
-
 
 
 
@@ -332,7 +319,7 @@ int perform_get(xs_async_connect* xas, bench_tl* btl, xs_conn* conn) {
     if (err && err!=exs_Error_WriteBusy) 
         xs_logger_error ("error %d -- conn error%d", err, xs_conn_error(conn));
     if (bncount>=bn->total) {
-        double t = ((double)(mytime() - gtime))/mytimediv(); 
+        double t = ((double)(mytime() - gtime)); 
         if (bncount>=bn->total) {
             xs_logger_info ("count %ld time %ld", (long)bncount, (long)(t*1000));
             xs_logger_info ("requests per second: %ld   bytes: %ld", (long)(bncount/t+.5), (long)gbytes);

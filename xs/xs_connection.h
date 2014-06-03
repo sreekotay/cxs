@@ -195,14 +195,14 @@ xs_async_callback*  xs_async_getcallback    (xs_async_connect* xas);
 
 
 //leftover
-#ifndef MSG_MORE
+#if   (!defined MSG_MORE) && defined MSG_PARTIAL
 #define MSG_MORE        MSG_PARTIAL
-#endif //MSG_MORE
-
-
-
-
-
+#elif (!defined MSG_MORE) && defined TCP_NOPUSH
+#define MSG_MORE        0x800
+#elif (!defined MSG_MORE)
+#define MSG_MORE        0
+#warning "MSG_MORE not defined... fix this for real... "
+#endif //MSG_PARTIAL
 
 
 
@@ -1348,28 +1348,43 @@ size_t xs_conn_write_ (xs_conn* conn, const void* buf, size_t len, int flags) {
     }
 #else
     size_t tot=0;
-    int n, amt;
+    int n, amt, a = (flags&MSG_MORE) ? 1 : 0;
+    
 
     conn->errnum = 0;
     if (xs_conn_cachefill(conn, buf, len, 0)) return len;
 
-    if ( (flags&MSG_MORE) && conn->corked==0) xs_sock_settcpcork (conn->sock, (conn->corked=1));
+    #ifdef TCP_CORK
+    #define _xs_tcpcork(a)     if (conn->corked!=a) xs_sock_settcpcork  (conn->sock, (conn->corked=a));
+    #else
+    #define _xs_tcpcork(a) 
+    #endif
+    #if !(defined TCP_CORK) && defined TCP_NOPUSH
+    #define _xs_tcpnopush(a)   if (conn->corked!=a) xs_sock_settcpnopush (conn->sock, (conn->corked=a));
+    #else
+    #define _xs_tcpnopush(a) 
+    #endif
+
+    if (a==1) _xs_tcpcork(1);
+    if (a==1) _xs_tcpnopush(1);
     while (tot<len) {
         amt = (len-tot)>INT_MAX ? INT_MAX : (int)(len-tot);
+        if (amt==(int)(len-tot) && a==0) _xs_tcpnopush(0);
         if (conn->ssl)  n = xs_SSL_write (conn->ssl, (char*)buf + tot, amt);
-        else if (1)     n = send (conn->sock, (char*)buf + tot, amt, 0); //flags handled by TCP_CORK
+        else if (1)     n = send (conn->sock, (char*)buf + tot, amt, 0); //flags handled by TCP_CORK/TCP_NOPUSH
         else            n = send (conn->sock, (char*)buf + tot, amt, flags);
-        //if (n<=0)    return tot;
         if (n==0)      return 0; //$$SREE normal socket termination
         tot += (n>0 ? n : 0);
         if (n!=amt) {
             amt -= (n>0 ? n : 0);
             if (xs_conn_cachefill(conn, (char*)buf + tot, amt, 1)) tot += amt;
-            if (n>0 || xs_conn_seterr(conn)==0) conn->errnum = exs_Error_WriteBusy;
+            if (n>0 || xs_conn_seterr(conn)==0)
+                conn->errnum = exs_Error_WriteBusy;
             break;
         }
     }
-    if (!(flags&MSG_MORE) && conn->corked==1) xs_sock_settcpcork (conn->sock, (conn->corked=0));
+    if (a==0) _xs_tcpcork(0);
+    if (a==0) _xs_tcpnopush(0);
 #endif
     return tot;
 }

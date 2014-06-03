@@ -82,6 +82,7 @@ int             xs_sock_settimeout              (int sock, int milliseconds);
 int             xs_sock_setnonblocking          (int sock, unsigned long on);
 int             xs_sock_settcpfastopen          (int sockfd);
 int             xs_sock_settcpcork              (int sockfd, int on);
+int             xs_sock_settcpnopush            (int sockfd, int on);
 int             xs_sock_avail                   (int sock, int inevent);
 int             xs_sock_closeonexec             (int sock);
 char*           xs_sock_addrtostr               (char *buf, size_t len, const xs_sockaddr* sa);
@@ -983,6 +984,7 @@ int xs_sock_settimeout(int sock, int milliseconds) {
 int  xs_sock_setnonblocking(int sock, unsigned long on) {return ioctlsocket(sock, FIONBIO, &on);}
 int  xs_sock_settcpfastopen(int sockfd)                 {return -1;}
 int  xs_sock_settcpcork(int sockfd, int on)             {return -1;}
+int  xs_sock_settcpnopush(int sockfd, int on)           {return -1;}
 int  xs_sock_err()                                      {return WSAGetLastError();}
 char xs_sock_wouldblock(int err)                        {return (err==WSAEWOULDBLOCK);}
 
@@ -1015,7 +1017,20 @@ int xs_sock_settcpfastopen(int sockfd)          {int hint=5; return setsockopt(s
 #else
 int xs_sock_settcpfastopen(int sockfd)          {return -1;}
 #endif
+
+
+#if TCP_CORK
 int xs_sock_settcpcork(int sockfd, int on)      {return setsockopt(sockfd, IPPROTO_TCP, TCP_CORK, &on, sizeof(on));}
+#else
+int xs_sock_settcpcork(int sockfd, int on)      {return -1;}
+#endif
+
+#if TCP_NOPUSH
+int xs_sock_settcpnopush(int sockfd, int on)    {return setsockopt(sockfd, IPPROTO_TCP, TCP_NOPUSH, &on, sizeof(on));}
+#else
+int xs_sock_settcpnopush(int sockfd, int on)    {return -1;}
+#endif
+
 
 #endif //_WIN32
 
