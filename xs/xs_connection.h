@@ -191,12 +191,14 @@ xs_async_callback*  xs_async_getcallback    (xs_async_connect* xas);
 // =================================================================================================================
 #endif //_xs_CONNECT_H_
 
-
-
-
 //leftover
 #ifndef MSG_MORE
+#ifdef MSG_PARTIAL
 #define MSG_MORE        MSG_PARTIAL
+#else
+#define MSG_MORE        0
+#warning "MSG_MORE not defined... fix this for real... "
+#endif //MSG_PARTIAL
 #endif //MSG_MORE
 
 

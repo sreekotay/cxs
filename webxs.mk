@@ -11,16 +11,29 @@ CCFLAGS   := -Os
 //CCFLAGS   := -g -ggdb
 CCPLAGS   := $(CCFLAGS)
 
-ifeq ($(OS),Windows_NT)
-	LDFLAGS = -lpthread -lws2_32 -lcomdlg32 -static-libgcc
-else 
-	//LDFLAGS   := -lpthread -ldl -lrt -g -ggdb
-	LDFLAGS   := -lpthread -ldl -lrt -flto
+ifndef OS
+
+UNAME=$(shell uname)
+OS=$(UNAME)
+
+#$(info OS = $(OS))
 endif
 
-DEADCODESTRIP := -fdata-sections -ffunction-sections -Wl,--gc-sections -Wl,-s
-//DEADCODESTRIP := 
+ifeq ($(OS),Windows_NT)
+	LDFLAGS = -lpthread -lws2_32 -lcomdlg32 -static-libgcc
+else ifeq ($(OS),Darwin)
+	CCFLAGS   := $(CCFLAGS) -Wunused-value
+	LDFLAGS   :=  -lpthread -ldl -flto
+else
+	LDFLAGS   :=  -lpthread -ldl -lrt -flto
+	//LDFLAGS   := -lpthread -ldl -lrt -g -ggdb
+endif
 
+ifneq ($(OS),Darwin)
+  DEADCODESTRIP := -fdata-sections -ffunction-sections -Wl,--gc-sections -Wl,-s
+else
+  DEADCODESTRIP := -fdata-sections -ffunction-sections
+endif
 
 # Project sources.
 C_SOURCE_FILES := webxs.c
