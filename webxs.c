@@ -257,8 +257,8 @@ int do_benchmark (int argc, char *argv[]) {
             }
         }
 
-        gtotaldl = (gtotaldl/tc)*tc;
         bn = (bench*)calloc(sizeof(bench), 1);
+        if (gconcurrent<tc) {gconcurrent = tc; xs_logger_info ("adjusting concurrency to: %d", tc);}
         bn->concurrenttotal = gconcurrent;
         bn->host = u&&u->host ? u->host : "127.0.0.1";
         bn->port = u&&u->port ? u->port : port;
@@ -268,14 +268,13 @@ int do_benchmark (int argc, char *argv[]) {
         if (1) {
             xs_atomic_add(bn->refcount, tc);
 	        for (i=0; i<tc; i++)
-		        xs_arr_push(xs_async_connect*, xa, launch_connects(bn, do_div(gconcurrent, tc, i), do_div(gtotaldl, tc, i)));
+		        xs_arr_push(xs_async_connect*, xa, launch_connects(bn, do_div(bn->concurrenttotal, tc, i), do_div(gtotaldl, tc, i)));
         } else gexit=1;
     }
 
 
     while (gexit==0) {sleep(1);}
 
-   // sleep(3);
 
     //done
     if (u) xs_uri_destroy(u);
@@ -292,15 +291,10 @@ double mytime() {
     return clock();
 #else
 	struct timespec ts;
-    struct timeval tv;
     int err;
     double t;
-    //return clock();
-	//gettimeofday (&tv, 0);
-	//return tv.tv_sec + tv.tv_usec * 1e-6;
     err = clock_gettime (CLOCK_REALTIME, &ts);
     t = ts.tv_sec + ts.tv_nsec * 1e-9;
-    //printf ("clock %g err %d\n", t, err);
     return t;
 #endif
 }
@@ -324,8 +318,8 @@ int perform_get(xs_async_connect* xas, bench_tl* btl, xs_conn* conn) {
     xs_atomic bncount = -1;
     bncount = xs_atomic_inc(bn->count) + 1;
     if ((bn->total<10 || (bncount%(bn->total/10))==0) && bncount) 
-        xs_logger_info ("progress... %ld", bncount);
-    while (xs_atomic_inc(btl->lcount)<=btl->ltotal) {
+        xs_logger_info ("progress... [0x%p]: %ld", btl, bncount);
+    while (xs_atomic_inc(btl->lcount)<btl->ltotal) {
         n   = xs_conn_httprequest (conn, bn->host, bn->method, bn->path);
         if (err==0) err = xs_conn_error(conn);
         n   = xs_conn_header_done (conn, 0);
@@ -341,6 +335,7 @@ int perform_get(xs_async_connect* xas, bench_tl* btl, xs_conn* conn) {
         if (bncount>=bn->total) {
             xs_logger_info ("count %ld time %ld", (long)bncount, (long)(t*1000));
             xs_logger_info ("requests per second: %ld   bytes: %ld", (long)(bncount/t+.5), (long)gbytes);
+            gexit = 1;
         }
         err = exs_Conn_Close;
         xs_async_stop (xas); 
@@ -363,11 +358,11 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
     else
     switch (message) {
         case exs_Conn_Write:
-            xs_atomic_dec(bn->concurrent);
+            //xs_atomic_dec(bn->concurrent);
 
         case exs_Conn_New:
             if (bn->count==0) gtime = mytime();
-            //xs_atomic_dec(bn->count);
+            xs_atomic_dec(bn->count);
             //xs_atomic_dec(btl->lcount);
             err = perform_get(xas, btl, conn); 
             if (err && err!=exs_Error_WriteBusy) {} 
@@ -395,15 +390,12 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
             if (xs_atomic_dec(bn->refcount)<=1) {
                 xs_async_setuserdata(xas, 0);
                 xs_logger_info ("---- bench complete - bytes %ld", (long)gbytes);
-                gexit = 1;
             }
             break;
 
         case exs_Conn_Close:
         case exs_Conn_Error:
             err = xs_conn_error(conn);
-            if (err) 
-                xs_logger_error ("Connection error %s: %d", bn->host, err);
             if ((bn&&xs_atomic_dec(bn->concurrent)<=bn->concurrenttotal) &&
                 (bn->count<bn->total) &&
                 (err==exs_Conn_Close || err==10054)) {
@@ -411,10 +403,11 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
                 xs_conn* conn2;
                 err = xs_conn_open (&conn2, bn->host, bn->port, 0);
                 if (err==0) xas = xs_async_read (xas, conn2, 0);
-                //printf ("----- retry %ld\n", (long)xs_atomic_inc(gretry));
                 if (err)
                     xs_logger_error ("Connection error %s: %d", bn->host, err);
-            } else
+            } else if (err && bn->count<bn->total) 
+                xs_logger_error ("Connection error %s: %d", bn->host, err);
+            else
                 err = err;
             break;
     }
@@ -424,7 +417,7 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
 
 xs_async_connect* launch_connects(bench* bn, int concurrent, int total) {
     int err=0, i;
-    xs_async_connect* xas=xs_async_create (1024, benchmark_cb);
+    xs_async_connect* xas=xs_async_create (concurrent, benchmark_cb);
     xs_conn* conn=0;
     bench_tl* btl = calloc(sizeof(bench_tl), 1);
     btl->bn = bn;

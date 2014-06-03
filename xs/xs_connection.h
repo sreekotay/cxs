@@ -1503,6 +1503,8 @@ int xs_async_handler(struct xs_pollfd* xp, int message, int sockfd, int xptoken,
                 if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_Write, conn);
                 if (err!=exs_Conn_Write) xs_pollfd_setsocket_events (xp, xptoken, POLLIN);
                 }
+            else
+                err = 0;
         break;
 
         case exs_pollfd_Error:
