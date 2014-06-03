@@ -1365,8 +1365,7 @@ size_t xs_conn_write_ (xs_conn* conn, const void* buf, size_t len, int flags) {
         if (n!=amt) {
             amt -= (n>0 ? n : 0);
             if (xs_conn_cachefill(conn, (char*)buf + tot, amt, 1)) tot += amt;
-            if (n>0 || xs_conn_seterr(conn)==0)
-                conn->errnum = exs_Error_WriteBusy;
+            if (n>0 || xs_conn_seterr(conn)==0) conn->errnum = exs_Error_WriteBusy;
             break;
         }
     }
@@ -1503,8 +1502,6 @@ int xs_async_handler(struct xs_pollfd* xp, int message, int sockfd, int xptoken,
                 if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_Write, conn);
                 if (err!=exs_Conn_Write) xs_pollfd_setsocket_events (xp, xptoken, POLLIN);
                 }
-            else
-                err = 0;
         break;
 
         case exs_pollfd_Error:
