@@ -152,23 +152,25 @@ void load_redirfile() {
     int err=0;
     xs_fileinfo_get (&fi, "redirect.json", 1);
     xs_fileinfo_lock (fi);
-    js = xs_json_create ((const char*)fi->data, fi->size);
-    while ((err=xs_json_next (js, &jt, 1))==0) {
-        switch (jt.type) {
-             case exs_JSON_ObjectStart: xs_logger_info ("{");   break;
-             case exs_JSON_ObjectEnd:   xs_logger_info ("}");   break;
-             case exs_JSON_ArrayStart:  xs_logger_info ("[");   break;
-             case exs_JSON_ArrayEnd:    xs_logger_info ("]");   break;
+    if (js = xs_json_create ((const char*)fi->data, fi->size)) {
+      while ((err=xs_json_next (js, &jt, 1))==0) { 
+          switch (jt.type) {
+               case exs_JSON_ObjectStart: xs_logger_info ("{");   break;
+               case exs_JSON_ObjectEnd:   xs_logger_info ("}");   break;
+               case exs_JSON_ArrayStart:  xs_logger_info ("[");   break;
+               case exs_JSON_ArrayEnd:    xs_logger_info ("]");   break;
 
-            case exs_JSON_Key:
-                xs_logger_info ("\"%.*s\" : ", jt.len, jt.ptr);
-                break;
+               case exs_JSON_Key:
+                  xs_logger_info ("\"%.*s\" : ", jt.len, jt.ptr);
+                  break;
 
-            case exs_JSON_Value:
-                xs_logger_info ("\"%.*s\"", jt.len, jt.ptr);
-                xs_arr_add(xs_json_tag, gurlarr, &jt, 1);
-                break;
-        }
+               case exs_JSON_Value:
+                  xs_logger_info ("\"%.*s\"", jt.len, jt.ptr);
+                  xs_arr_add(xs_json_tag, gurlarr, &jt, 1);
+                  break;
+          }
+      }
+      xs_json_destroy(js);
     }
     xs_fileinfo_unlock (fi);
     xs_fileinfo_unloaddata (fi);
@@ -312,37 +314,41 @@ double mytimediv() {
 
 double gtime=0;
 xs_atomic gretry=0;
-int perform_get(xs_async_connect* xas, bench_tl* btl, xs_conn* conn) {
+int perform_get(bench_tl* btl, xs_conn* conn) {
     int err=0, n;
     bench* bn = btl->bn;
     xs_atomic bncount = -1;
-    bncount = xs_atomic_inc(bn->count) + 1;
-    if ((bn->total<10 || (bncount%(bn->total/10))==0) && bncount) 
+#if 0
+    while ((bncount=xs_atomic_inc(bn->count)+1)<bn->total) {
+#else
+    //printf ("lcount %d   ltotal %d\n", (int)btl->lcount, (int)btl->ltotal);
+    while (xs_atomic_inc(btl->lcount)<=btl->ltotal) {
+        bncount = xs_atomic_inc(bn->count) + 1;
+#endif
+        if (bncount==100)
+            bncount=100;
+        if ((bn->total<10 || (bncount%(bn->total/10))==0) && bncount) 
         xs_logger_info ("progress... [0x%p]: %ld", btl, bncount);
     while (xs_atomic_inc(btl->lcount)<btl->ltotal) {
-        n   = xs_conn_httprequest (conn, bn->host, bn->method, bn->path);
         if (err==0) err = xs_conn_error(conn);
-        n   = xs_conn_header_done (conn, 0);
+        if (err==0) n   = xs_conn_header_done (conn, 0);
         if (err==0) err = xs_conn_error(conn);
-        if (err==exs_Error_WriteBusy) break;
-        //if (err) {xs_atomic_dec(bn->count); break;}
+        if (err)
+            err=err;
         if (gpipeline==0) break;
+        if (err) {xs_atomic_dec(bn->count); break;}
     }  
-    if (err && err!=exs_Error_WriteBusy) 
-        xs_logger_error ("error %d -- conn error%d", err, xs_conn_error(conn));
+    if (err) xs_logger_error ("error %d -- conn error%d", err, xs_conn_error(conn));
     if (bncount>=bn->total) {
-        double t = ((double)(mytime() - gtime))/mytimediv(); 
-        if (bncount>=bn->total) {
+        double t = ((double)(clock() - gtime))/CLOCKS_PER_SEC; 
+        if (bncount==bn->total) {
             xs_logger_info ("count %ld time %ld", (long)bncount, (long)(t*1000));
             xs_logger_info ("requests per second: %ld   bytes: %ld", (long)(bncount/t+.5), (long)gbytes);
             gexit = 1;
         }
         err = exs_Conn_Close;
-        xs_async_stop (xas); 
-    } else if (bncount<0) {
+    } else if (bncount<0)
         err = exs_Conn_Close;
-        //xs_async_stop (xas); 
-    }
 
     return err;
 }
@@ -353,12 +359,10 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
     bench_tl* btl = (bench_tl*)xs_async_getuserdata (xas);
     bench* bn = btl ? btl->bn : 0;
 
-    if (bn==0) 
-        err = exs_Conn_Close;
+    if (bn==0) err = exs_Conn_Close;
     else
     switch (message) {
         case exs_Conn_Write:
-            //xs_atomic_dec(bn->concurrent);
 
         case exs_Conn_New:
             if (bn->count==0) gtime = mytime();
@@ -379,8 +383,8 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
                 if (err) 
                     err = exs_Conn_Close;
                 else if (s==exs_Conn_Complete) {
-                    err = perform_get(xas, btl, conn); 
-                    if (err) {if (err!=exs_Error_WriteBusy) {}  else err = exs_Conn_Write;}
+                    err = perform_get(btl, conn); 
+                    if (err) xs_async_stop(xas);
                 }
             }
             break;
@@ -397,18 +401,18 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
         case exs_Conn_Error:
             err = xs_conn_error(conn);
             if ((bn&&xs_atomic_dec(bn->concurrent)<=bn->concurrenttotal) &&
-                (bn->count<bn->total) &&
-                (err==exs_Conn_Close || err==10054)) {
+                err==exs_Conn_Close) {
                 //we were shut down gracefully, so try again
                 xs_conn* conn2;
                 err = xs_conn_open (&conn2, bn->host, bn->port, 0);
                 if (err==0) xas = xs_async_read (xas, conn2, 0);
-                if (err)
-                    xs_logger_error ("Connection error %s: %d", bn->host, err);
+            }
+            if (err) {
+                xs_logger_error ("Connection error %s: %d", bn->host, err);
             } else if (err && bn->count<bn->total) 
                 xs_logger_error ("Connection error %s: %d", bn->host, err);
             else
-                err = err;
+                err = err; //for debugging
             break;
     }
 
