@@ -337,128 +337,6 @@ const char *xs_find_mime_type(const char *path) {
 #define O_BINARY 0 
 #endif
 #endif
-int xs_conn_cachepurge (xs_conn* conn); 
-size_t xs_http_writefiledata(xs_conn* conn, const char* path, xs_fileinfo* fdp, size_t rs, size_t re, int blocking) {
-    char buf[8192];
-    const xs_httpreq* req = xs_conn_getreq(conn);
-    int sock=-1, fi;
-    size_t tot=0, outtot=re-rs, w;
-    //FILE* f;
-
-    if (xs_conn_writable(conn)==0 && blocking==0) return 0;
-    if (1 && fdp->data) {
-        //from cache
-        do {
-            w = 256<<12;
-            if (tot+w>outtot) w=outtot-tot;
-            //xs_conn_cacheset(conn);
-            if (xs_conn_writable(conn)==0) {if (blocking==0) return tot; xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);}
-            w = xs_conn_write_ (conn, fdp->data+rs+tot, (size_t)w, (tot+w<outtot) ? MSG_MORE : 0);
-            if (xs_conn_error(conn)==exs_Error_WriteBusy) {
-                if (blocking==0) return tot; 
-                xs_logger_warn ("blocking socket for write %s", path);
-                xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-                xs_conn_cachepurge(conn);
-            } else if (xs_conn_error (conn) || w<=0) {xs_logger_warn ("write error bytes:%zd. %zd of %zd - err [%d]", w, tot+w, outtot, xs_conn_error (conn)); break;}//{if (result==0 && tot==0) tot=w; break;}
-            tot += w;
-        } while (tot<outtot);
-    } else {
-        //from file
-        //xs_logger_info ("reading file %s", path);
-        size_t bsize    = 256<<10; 
-        char *bufn      = (char*)malloc(bsize = bsize>outtot ? outtot : bsize);
-        if (bufn==0)    {bufn=buf; bsize=sizeof(buf);}
-
-#if 0
-        fi = xs_open(path, O_RDONLY|O_BINARY, 0);
-        //f = fopen (path, "rb");
-        if (fi) {
-            char* fptr = (char*)mmap (0, outtot, PROT_READ, MAP_SHARED, fi, rs);
-            #ifndef _WIN32
-            fcntl(fi, F_SETFD, FD_CLOEXEC);
-            #endif
-            do {
-                w = bsize;
-                if (tot+w>outtot) w=outtot-tot;
-                if (0 || xs_conn_writable(conn)==0) {
-                    if (blocking==0) {munmap (fptr, outtot); close(fi); return tot;} 
-                    xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-                }
-                //w = read (fi, bufn, w);
-                w = xs_conn_write_ (conn, fptr+tot, w, (tot+w<outtot) ? MSG_MORE : 0);
-                if (xs_conn_error (conn) || w==0)  break;
-                tot += w;
-            } while (tot<outtot);
-            munmap (fptrre, outtot);
-            close (fi);
-        }  
-#elif 1
-        fi = xs_open(path, O_RDONLY|O_BINARY, 0);
-        if (fi) {
-            #ifndef _WIN32
-            fcntl(fi, F_SETFD, FD_CLOEXEC);
-            #endif
-            lseek (fi, (size_t)rs, SEEK_SET);
-            do {
-                w = bsize;
-                if (tot+w>outtot) w=outtot-tot;
-                if (xs_conn_writable(conn)==0) {
-                    if (blocking==0) {close(fi); return tot;} 
-                    xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-                }
-                w = read (fi, bufn, w); 
-                w = xs_conn_write_ (conn, bufn, w, (tot+w<outtot) ? MSG_MORE : 0);
-                tot += w>0 ? w : 0;
-                if (xs_conn_error(conn)==exs_Error_WriteBusy) {
-                    if (blocking==0) {printf ("err1\n"); close(fi); return tot;} 
-                    xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-                    //xs_conn_cachepurge (conn);
-                } else if (xs_conn_error(conn) || w<=0) break;
-            } while (tot<outtot);
-            close (fi);
-        }  
-#else
-        f = xs_fopen (path, "rb");
-        if (f) {
-            #ifndef _WIN32
-            fcntl(fileno(f), F_SETFD, FD_CLOEXEC);
-            if (rs) fseek (f, rs, SEEK_SET);
-            #else
-            fseek (f, (size_t)rs, SEEK_SET);
-            #endif
-            do {
-                w = bsize;
-                if (tot+w>outtot) w=outtot-tot;
-                if (0 || xs_conn_writable(conn)==0) {
-                    if (blocking==0) {fclose(f); return tot;} 
-                    xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
-                }
-                w = fread (bufn, 1, w, f);
-                //xs_printf ("writing %zd but managed ", w);
-                w = xs_conn_write_ (conn, bufn, w, (tot+w<outtot) ? MSG_MORE : 0);
-                //xs_printf ("%zd\n", w);
-                if (xs_sizet_negzero(w)) break;//{if (result==0 && tot==0) tot=w; break;}
-                tot += w;
-            } while (tot<outtot);
-            fclose (f);
-        }  
-#endif
-
-        if (bufn!=buf) free(bufn);
-    }
-
-    if (sock>=0) xs_sock_setnonblocking(sock, 0);
-    
-    //didn't write data properly
-    if (tot!=re-rs && blocking) {
-        //shit.
-        if (xs_conn_error(conn)) xs_logger_error ("connection error %d. %lld!=%lld", xs_conn_error(conn), (xsint64)tot, (xsint64)(re-rs));
-        xs_http_setint ((xs_httpreq* )req, exs_Req_KeepAlive, 0);
-        xs_http_setint (xs_conn_getreq(conn), exs_Req_Status, 0);
-    }
-
-    return tot;
-}
 
 char* xs_http_etag (char* str, int ssize, const xs_fileinfo *fd) {
     xsuint64 mt;
@@ -479,15 +357,6 @@ static char xs_http_notmodified(const xs_httpreq *req, const xs_fileinfo *fd) {
 #else
 #define INT64_FMT		"lld"
 #endif
-
-
-
-typedef struct writeq_data {
-    xs_atomic seq;
-    char* path;
-    xsuint64 rs, re;
-    xs_conn *conn;
-} writeq_data;
 
 
 size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* path, int dobody) {
@@ -570,7 +439,7 @@ size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* pa
             ver ? ver : "1.0", statuscode, statusmsg, (size_t) (dobody ? (re-rs) : 0), xs_server_name(), 
             xs_timestr_now(), /*modt,*/ xs_http_etag(etag, sizeof(etag), fdp), 
             xs_find_mime_type(path),//strstr(path, "htm") ? "text/html" : "text/plain", 
-            xs_http_getint(req, exs_Req_KeepAlive) ? "keep-alive" : "close",
+            (xs_http_getint(req, exs_Req_KeepAlive) && dobody!=2) ? "keep-alive" : "close",
             range);
         xs_conn_header_done(conn, dobody && (re-rs)!=0);
     }
@@ -578,18 +447,11 @@ size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* pa
 
     //write body
     if (dobody==1 && (re-rs)!=0) { //note dobody==1 --- allows HEAD requests to specify dobody=2
-#if 0
-        writeq_data wqdata;
-        wqdata.seq = xs_conn_seqinc(conn);
-        wqdata.conn = conn;
-        wqdata.rs = rs;
-        wqdata.re = re;
-        wqdata.path = xs_strdup (path);
-        xs_conn_inc(conn);
-        xs_async_work (&xas, conn);
-#else
-        result += xs_http_writefiledata (conn, path, fdp, (size_t)rs, (size_t)re, 1);
-#endif
+        if (0) {
+            xs_fileinfo_unlock(fdp);
+            xs_async_write_filedata(xas, conn, path, rs, re);
+            xs_fileinfo_lock (fdp);
+        } else result += xs_conn_write_filedata (conn, path, fdp, (size_t)rs, (size_t)re, 1);
     }
 
     //unlock
@@ -599,31 +461,6 @@ size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* pa
     return result;
 }
 
-
-
-void writeq_proc (xs_queue* qs, writeq_data *wqd, void* privateData) {
-    xs_fileinfo *fdp;
-    size_t result;
-    xs_fileinfo_get (&fdp, wqd->path, 1);
-    xs_fileinfo_lock (fdp);
-    //xs_printf ("writing      %lld -- %lld :: %lld\n", (wqd->re-wqd->rs), wqd->rs, wqd->re);
-    result = xs_conn_writable(wqd->conn) ? xs_http_writefiledata (wqd->conn, wqd->path, fdp, (size_t)wqd->rs, (size_t)wqd->re, 0) : 0;
-    xs_fileinfo_unlock (fdp);
-    if (/*xs_sizet_neg(result)==0 && */result != (size_t)(wqd->re-wqd->rs) && xs_conn_error(wqd->conn)==0) {
-        printf ("retrying %ld of %ld -- %ld :: %ld\n", (long)result, (long)(wqd->re-wqd->rs), (long)wqd->rs, (long)wqd->re);
-        if (result>0) wqd->rs += result;
-        xs_queue_push (qs, wqd, 1);
-    } else {
-        if (result==0) printf ("closed  %ld of %ld -- %ld :: %ld\n", (long)result, (long)(wqd->re-wqd->rs), (long)wqd->rs, (long)wqd->re);
-        if (wqd->path) free(wqd->path);
-        if (xs_http_getint(xs_conn_getreq(wqd->conn), exs_Req_KeepAlive)==0)
-            xs_conn_close(wqd->conn);
-        xs_conn_dec(wqd->conn);
-    }
-    (void)qs;
-    (void)wqd;
-    (void)privateData;
-}
 
 
 int xs_server_handlerequest(xs_server_ctx* ctx, xs_conn* conn) {

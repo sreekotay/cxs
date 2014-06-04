@@ -86,6 +86,7 @@ enum {
 // ======================================================================
 typedef struct xs_conn xs_conn;
 typedef struct xs_httpreq xs_httpreq;
+struct xs_fileinfo;
 
 //manage
 int                 xs_conn_listen          (xs_conn** connp, int port, int use_ssl, int ipv6);
@@ -116,6 +117,7 @@ int                 xs_conn_printf_va       (xs_conn*, const char *fmt, va_list 
 int                 xs_conn_printf_header_va(xs_conn*, const char *fmt, va_list apin);
 int                 xs_conn_write_websocket (xs_conn*, int opcode, const char *data, size_t len, char do_mask);
 size_t              xs_conn_write_httperror (xs_conn*, int statuscode, const char* description, const char* body, ...);
+size_t              xs_conn_write_filedata  (xs_conn*, const char* path, struct xs_fileinfo* fdp, size_t rs, size_t re, int blocking);
 int                 xs_conn_httplogaccess   (xs_conn*, size_t result);
 
 //http request functions                    NOTE: you must call xs_conn_header_done() after the functions below     //you may add your own headers first....
@@ -187,6 +189,10 @@ void*               xs_async_getuserdata    (xs_async_connect*);
 void                xs_async_setcallback    (xs_async_connect* xas, xs_async_callback* p);
 xs_async_callback*  xs_async_getcallback    (xs_async_connect* xas);         
 
+//write function
+int                 xs_async_work           (xs_async_connect* xas, int message, xs_conn* conn, xs_async_callback* p);
+void                xs_async_write_filedata (xs_async_connect* xas, xs_conn* conn, const char* path, size_t rs, size_t re);
+
 // =================================================================================================================
 // =================================================================================================================
 #endif //_xs_CONNECT_H_
@@ -227,6 +233,7 @@ xs_async_callback*  xs_async_getcallback    (xs_async_connect* xas);
 #include "xs_printf.h"
 #include "xs_sha1.h"
 #include "xs_logger.h"
+#include "xs_fileinfo.h"
 #define _xs_IMPLEMENTATION_
 
 
@@ -265,12 +272,13 @@ struct xs_httpreq {
     unsigned int        statuscode, chunked:1, keepalive:1, upgrade:4, opcode:4, done:1, header:1;
     int                 reqlen, reqmallocsize;
     union               {char datamask[4]; xsint32 datamask32;};
+    xs_atomic           lockcount;
     time_t              createtime;
     size_t              contentlen, counter, total;
     size_t              consumed;
     xs_httpreq*         next;
     const char          *uri, *method, *version, *status, *hash, *query;
-    char*               buf;
+    char                *buf, *path;
     int                 numheaders;
     struct xs_httpheader {
         const char *name;       
@@ -281,14 +289,14 @@ struct xs_httpreq {
 // ==============================================
 //  conn mgmt
 // ==============================================
-int          xs_conn_error (const xs_conn* conn)                    {return conn ? conn->errnum : -50;}
-int          xs_conn_getsock (const xs_conn* conn)                  {return conn ? conn->sock : INVALID_SOCKET; }
-int          xs_conn_setuserdata    (xs_conn* conn, void* data)     {if (conn==0) return -50; conn->userdata=data; return 0;}
-void*        xs_conn_getuserdata    (const xs_conn* conn)           {return conn ? conn->userdata : 0;}
-const char*  xs_conn_getsockaddrstr (const xs_conn* conn)           {return conn ? conn->sastr : 0;}
-const xs_sockaddr* xs_conn_getsockaddr (const xs_conn* conn)        {return conn ? &conn->sa : 0; }
-             
-int          xs_conn_cachepurge (xs_conn* conn); //forward declaration
+int                 xs_conn_error          (const xs_conn* conn)           {return conn ? conn->errnum : -50;}
+int                 xs_conn_getsock        (const xs_conn* conn)           {return conn ? conn->sock : INVALID_SOCKET; }
+int                 xs_conn_setuserdata    (xs_conn* conn, void* data)     {if (conn==0) return -50; conn->userdata=data; return 0;}
+void*               xs_conn_getuserdata    (const xs_conn* conn)           {return conn ? conn->userdata : 0;}
+const char*         xs_conn_getsockaddrstr (const xs_conn* conn)           {return conn ? conn->sastr : 0;}
+const xs_sockaddr*  xs_conn_getsockaddr    (const xs_conn* conn)           {return conn ? &conn->sa : 0; }
+void                xs_http_reqfree        (xs_httpreq* req);              //forward declaration
+int                 xs_conn_cachepurge     (xs_conn* conn);                //forward declaration
 xs_conn*     xs_conn_create()   {xs_conn* conn; xs_logger_counter_add (1, 1); conn = (xs_conn*)calloc(sizeof(xs_conn), 1); if (conn==0) return 0; conn->token=-1;  return conn;}
 xs_conn*     xs_conn_close(xs_conn *conn) {
     struct xs_httpreq *req, *hold;
@@ -313,7 +321,7 @@ xs_conn*     xs_conn_close(xs_conn *conn) {
     while (req) {
         hold = req;
         req = req->next;
-        free (hold);
+        xs_http_reqfree (hold);
     }
     memset (((char*)conn)+sizeof(xs_atomic), 0, sizeof(*conn)-sizeof(xs_atomic));
     return conn;
@@ -549,12 +557,18 @@ int xs_http_setint (xs_httpreq* req, int attr, int val) {
 
 void xs_req_clear(xs_httpreq* req) {
     if (req==0) return;
+    xs_atomic_spin_do (req->lockcount, "");//printf ("req lock\n"));
     req->consumed = req->contentlen = 0;
     req->numheaders = req->opcode = req->done = req->statuscode = 0;
     req->chunked = req->upgrade = req->keepalive = 0;
     req->version = req->method = req->uri = req->query = req->status = 0;
     req->datamask32 = 0;
     req->next = 0;
+    if (req->path) {
+        free(req->path);
+        req->path = 0;
+        req->counter = 0;
+    }
 }
 
 const char *xs_http_getheader(const xs_httpreq* req, const char *name) {
@@ -986,8 +1000,8 @@ int xs_http_createreq(xs_conn *conn, int rlen) { //rlen may be zero
 
     //allocate space
     reqmallocsize                               = sizeof(xs_httpreq) + rlen + 1;
-    if (req==0)                                 {req = (xs_httpreq*)malloc(reqmallocsize);             if (req) req->reqmallocsize = reqmallocsize;}
-    else if (reqmallocsize>req->reqmallocsize)  {req = (xs_httpreq*)realloc(conn->req, reqmallocsize); if (req) req->reqmallocsize = reqmallocsize;}
+    if (req==0)                                 {req = (xs_httpreq*)calloc(reqmallocsize, 1);                                    if (req) req->reqmallocsize = reqmallocsize;}
+    else if (reqmallocsize>req->reqmallocsize)  {req = (xs_httpreq*)xs_recalloc(conn->req, req->reqmallocsize, reqmallocsize,1); if (req) req->reqmallocsize = reqmallocsize;}
     //else if (conn->upgrade==0)                  req = (xs_httpreq*)realloc(conn->req, reqmallocsize); //keep reusing if we're upgraded
     if (req==0)                     {conn->errnum = exs_Error_OutOfMemory; return -108;}
     if (conn->req==0)               {conn->req = req; assert (conn->lastreq==0);}
@@ -1005,7 +1019,10 @@ int xs_http_createreq(xs_conn *conn, int rlen) { //rlen may be zero
     req->createtime = time(0);
     return 0;
 }
-
+void xs_http_reqfree(xs_httpreq* req) {
+    if (req->path) free(req->path);
+    free (req);
+}
 int xs_conn_headerready(xs_conn *conn) {
     int rlen=0, n=-1;
     int maxheaderlen = (1<<17);
@@ -1461,6 +1478,173 @@ int xs_conn_printf_chunked(xs_conn *conn, const char *fmt, ...) {
     return len;
 }
 
+int xs_async_write_filedata_cb (xs_async_connect* xas, int message, xs_conn* conn) {
+    xs_httpreq* req = xs_conn_getreq(conn);
+    if (req==0) return -1;
+    xs_async_write_filedata (xas, conn, 0, req->counter, req->total);
+    return 0;
+}
+xs_atomic xs_scounter=0; 
+void xs_async_write_filedata(xs_async_connect* xas, xs_conn* conn, const char* path, size_t rs, size_t re) {
+    xs_fileinfo *fdp;
+    size_t result = 0;
+    xs_httpreq* req = xs_conn_getreq(conn);
+    xs_atomic lc;
+    if (req==0) return;
+    if (path) {if (req->path) {printf ("fuuuu\n"); free(req->path);} req->path = xs_strdup (path);}
+    if (req->path==0) return;
+    if (1) {
+        //printf ("counter %d %s\n", (int)xs_atomic_inc(xs_scounter), req->path);
+    }
+    if (rs>=re || (req->counter>=req->total&&req->total)) {
+         printf ("wtf %d %s: %zd -- %zd\n", (int)xs_atomic_inc(xs_scounter), req->path, req->counter, req->total);
+         return;
+   }
+
+    xs_fileinfo_get (&fdp, req->path, 1);
+    xs_fileinfo_lock (fdp);
+    result = (path==0 ? xs_conn_write_filedata (conn, req->path, fdp, req->counter, re, 0) : 0);
+    xs_fileinfo_unlock (fdp);
+    req->counter = rs + result;
+    req->total   = re;
+    if (req->counter!=req->total) {
+        if (path)
+            xs_atomic_inc(req->lockcount);
+        //lc = req->lockcount; if (lc!=1) printf ("lock %d\n", (int)lc);
+        if (path==0)
+            xs_conn_write_filedata (conn, req->path, fdp, req->counter, req->total, 0);
+        xs_async_work (xas, exs_Conn_Work, conn, xs_async_write_filedata_cb);
+    } else {
+        //free (req->path);
+        //req->path = 0;
+    }
+    if (path==0) {
+        lc = xs_atomic_dec(req->lockcount);
+        //if (lc!=1) printf ("lock %d\n", (int)lc);
+    }
+}
+size_t xs_conn_write_filedata(xs_conn* conn, const char* path, struct xs_fileinfo* fdp, size_t rs, size_t re, int blocking) {
+    char buf[8192];
+    const xs_httpreq* req = xs_conn_getreq(conn);
+    int sock=-1, fi;
+    size_t tot=0, outtot=re-rs, w;
+    //FILE* f;
+
+    if (outtot==0) {xs_logger_warn("zero write"); return 0;}
+    if (xs_conn_writable(conn)==0 && blocking==0) return 0;
+    if (1 && fdp->data) {
+        //from cache
+        do {
+            w = 256<<12;
+            if (tot+w>outtot) w=outtot-tot;
+            //xs_conn_cacheset(conn);
+            if (xs_conn_writable(conn)==0) {if (blocking==0) return tot; xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);}
+            w = xs_conn_write_ (conn, fdp->data+rs+tot, (size_t)w, (tot+w<outtot) ? MSG_MORE : 0);
+            if (xs_conn_error(conn)==exs_Error_WriteBusy) {
+                if (blocking==0) return tot; 
+                xs_logger_warn ("blocking socket for write %s", path);
+                xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
+                xs_conn_cachepurge(conn);
+            } else if (xs_conn_error (conn) || w<=0) {xs_logger_warn ("write error bytes:%zd. %zd of %zd - err [%d]", w, tot+w, outtot, xs_conn_error (conn)); break;}//{if (result==0 && tot==0) tot=w; break;}
+            tot += w;
+        } while (tot<outtot);
+    } else {
+        //from file
+        //xs_logger_info ("reading file %s", path);
+        size_t bsize    = 256<<10; 
+        char *bufn      = (char*)malloc(bsize = bsize>outtot ? outtot : bsize);
+        if (bufn==0)    {bufn=buf; bsize=sizeof(buf);}
+
+#if 0
+        fi = xs_open(path, O_RDONLY|O_BINARY, 0);
+        //f = fopen (path, "rb");
+        if (fi) {
+            char* fptr = (char*)mmap (0, outtot, PROT_READ, MAP_SHARED, fi, rs);
+            #ifndef _WIN32
+            fcntl(fi, F_SETFD, FD_CLOEXEC);
+            #endif
+            do {
+                w = bsize;
+                if (tot+w>outtot) w=outtot-tot;
+                if (0 || xs_conn_writable(conn)==0) {
+                    if (blocking==0) {munmap (fptr, outtot); close(fi); return tot;} 
+                    xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
+                }
+                //w = read (fi, bufn, w);
+                w = xs_conn_write_ (conn, fptr+tot, w, (tot+w<outtot) ? MSG_MORE : 0);
+                if (xs_conn_error (conn) || w==0)  break;
+                tot += w;
+            } while (tot<outtot);
+            munmap (fptrre, outtot);
+            close (fi);
+        }  
+#elif 1
+        fi = xs_open(path, O_RDONLY|O_BINARY, 0);
+        if (fi) {
+            #ifndef _WIN32
+            fcntl(fi, F_SETFD, FD_CLOEXEC);
+            #endif
+            lseek (fi, (size_t)rs, SEEK_SET);
+            do {
+                w = bsize;
+                if (tot+w>outtot) w=outtot-tot;
+                if (xs_conn_writable(conn)==0) {
+                    if (blocking==0) {close(fi); return tot;} 
+                    xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
+                }
+                w = read (fi, bufn, w); 
+                w = xs_conn_write_ (conn, bufn, w, (tot+w<outtot) ? MSG_MORE : 0);
+                tot += w>0 ? w : 0;
+                if (xs_conn_error(conn)==exs_Error_WriteBusy) {
+                    if (blocking==0) {printf ("err1\n"); close(fi); return tot;} 
+                    xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
+                    //xs_conn_cachepurge (conn);
+                } else if (xs_conn_error(conn) || w<=0) break;
+            } while (tot<outtot);
+            close (fi);
+        }  
+#else
+        f = xs_fopen (path, "rb");
+        if (f) {
+            #ifndef _WIN32
+            fcntl(fileno(f), F_SETFD, FD_CLOEXEC);
+            if (rs) fseek (f, rs, SEEK_SET);
+            #else
+            fseek (f, (size_t)rs, SEEK_SET);
+            #endif
+            do {
+                w = bsize;
+                if (tot+w>outtot) w=outtot-tot;
+                if (0 || xs_conn_writable(conn)==0) {
+                    if (blocking==0) {fclose(f); return tot;} 
+                    xs_sock_setnonblocking(sock=xs_conn_getsock(conn), 0);
+                }
+                w = fread (bufn, 1, w, f);
+                //xs_printf ("writing %zd but managed ", w);
+                w = xs_conn_write_ (conn, bufn, w, (tot+w<outtot) ? MSG_MORE : 0);
+                //xs_printf ("%zd\n", w);
+                if (xs_sizet_negzero(w)) break;//{if (result==0 && tot==0) tot=w; break;}
+                tot += w;
+            } while (tot<outtot);
+            fclose (f);
+        }  
+#endif
+
+        if (bufn!=buf) free(bufn);
+    }
+
+    if (sock>=0) xs_sock_setnonblocking(sock, 0);
+    
+    //didn't write data properly
+    if (tot!=re-rs && blocking) {
+        //shit.
+        if (xs_conn_error(conn)) xs_logger_error ("connection error %d. %lld!=%lld", xs_conn_error(conn), (xsint64)tot, (xsint64)(re-rs));
+        xs_http_setint ((xs_httpreq* )req, exs_Req_KeepAlive, 0);
+        xs_http_setint (xs_conn_getreq(conn), exs_Req_Status, 0);
+    }
+
+    return tot;
+}
 
 // =================================================================================================================
 //  async implementation
@@ -1566,18 +1750,20 @@ void * async_threadproc(struct xs_async_connect* xas) {
 typedef struct xs_async_workdata {
     int message;
     xs_conn* conn;
+    xs_async_callback* proc;
 } xs_async_workdata;
 
 
 void xs_async_cb (xs_queue* qs, xs_async_workdata *wdp, xs_async_connect* xas) {
     if (wdp && wdp->conn) {
-        xs_async_call(xas, wdp->message, wdp->conn);
+        if (wdp->proc)  (*wdp->proc)  (xas, wdp->message, wdp->conn);
+        else            xs_async_call (xas, wdp->message, wdp->conn);
         xs_conn_dec(wdp->conn);
     }
 }
 
-int xs_async_work (xs_async_connect* xas, int message, xs_conn* conn) {
-    xs_async_workdata wd = {message, conn};
+int xs_async_work (xs_async_connect* xas, int message, xs_conn* conn, xs_async_callback* p) {
+    xs_async_workdata wd = {message, conn, p};
     if (conn==0) return -1;
     xs_conn_inc(conn);
     return xs_queue_push (&xas->q, &wd, 1);
@@ -1593,7 +1779,7 @@ xs_async_connect*  xs_async_create(int hintsize, xs_async_callback* p) {
     xs_pollfd_set_userdata      (xas->xp, xas);
     pthread_create              (&xas->th, 0, (xs_thread_proc)async_threadproc, xas);
     if (xas->th==0)             {xs_pollfd_destroy(xas->xp); free(xas); return 0;}
-    xs_queue_create             (&xas->q, sizeof(xs_conn**), 1024*10, (xs_queue_proc)xs_async_cb, xas);
+    xs_queue_create             (&xas->q, sizeof(struct xs_async_workdata), 1024*10, (xs_queue_proc)xs_async_cb, xas);
     xs_queue_launchthreads      (&xas->q, 20, 0);
     xs_async_call               (xas, exs_XAS_Create, 0);
 
