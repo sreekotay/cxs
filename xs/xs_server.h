@@ -639,7 +639,7 @@ int xs_server_handlerequest(xs_server_ctx* ctx, xs_conn* conn) {
     //====================
     if (h && (!strcmp(h, "GET") || !strcmp(h, "HEAD"))) {
 
-        if(xs_server_auth_request(ctx, conn) != 0) {
+        if(ctx->auth_file && xs_server_auth_request(ctx, conn) != 0) {
             xs_conn_write_httperror (conn, 401, "Not Authorized\r\nWWW-Authenticate: Basic", "");
             return exs_Conn_Close;
         }
@@ -670,8 +670,6 @@ int xs_server_auth_request(xs_server_ctx* ctx, xs_conn* conn) {
     char* authfile;
     char plaintext[256], salt[3];
     base64_decodestate b64state;
-
-    if (!ctx->auth_file) return 0;
 	
     req = xs_conn_getreq (conn);
     a = xs_http_getheader (req, "Authorization");
