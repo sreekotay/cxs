@@ -20,7 +20,7 @@ static int      xs_ptr_binsearch    (const void* basePtr, int count, int es,
                                      const void* key, xs_ptr_compareproc compareProc, const void* customData);
 static int      xs_ptr_qsort        (const void* basePtr, int count, int es, 
                                      xs_ptr_compareproc compareProc, const void* customData);
-static void*    xs_recalloc         (void *ptr, int* space, int newSpace, int elemSize);
+static void*    xs_recalloc         (void *ptr, int space, int newSpace, int elemSize);
 
 
 // =================================================================================================================
@@ -37,8 +37,8 @@ typedef struct  xs_arr  xs_array;
 
 static int      xs_arr_create_      (xs_array* ar)                                              {memset(ar, 0, sizeof(*ar));return 0;}
 static int      xs_arr_destroy_     (xs_array* ar)                                              {if (ar->aData) free(ar->aData); xs_arr_create_(ar);return 0;}
-static int      xs_arr_makespace_   (xs_array* ar, int space, int es)                           {void* p=ar->aData; if (space>=ar->aSpace) p=(void*)xs_recalloc(p,&ar->aSpace,(ar->aSpace*2>space)?ar->aSpace*2:space,es); 
-                                                                                                 if (p) ar->aData=p; return p==0;}
+static int      xs_arr_makespace_   (xs_array* ar, int space, int es)                           {void* p=ar->aData; int ns=ar->aSpace; if (space>=ns) p=(void*)xs_recalloc(p,ar->aSpace,ns=(ns*2>space)?ns*2:space,es); 
+                                                                                                 if (p) {ar->aData=p; ar->aSpace=ns;} return p==0;}
 static int      xs_arr_remove_      (xs_array* ar, int before, int n, int es)                   {if (n<ar->aCount) xs_ptr_remove (ar->aData, ar->aCount, es, before, n); ar->aCount -= n; return 0;}
 static int      xs_arr_insert_      (xs_array* ar, int before, const void* data, int n, int es) {int err=(ar->aCount+n>ar->aSpace)?xs_arr_makespace_(ar,ar->aCount+n,es):0; if (err) return err;
                                                                                                  xs_ptr_insert (ar->aData, ar->aCount, es, data, before, n); ar->aCount += n; return 0;}
@@ -82,13 +82,10 @@ static int      xs_arr_ptrinrange_  (xs_array* ar, void* p, int es)             
 // =================================================================================================================
 // xs_recalloc 
 // =================================================================================================================
-static void* xs_recalloc(void *p, int* c, int r, int se) {
-    int oc=*c;
+static void* xs_recalloc(void *p, int oc, int r, int se) {
     if (p==0) {
-        *c=r;
         p=calloc(r*se, 1);
-    } else if (r>*c) {
-        (*c)=r;
+    } else if (r>oc) {
         p=realloc(p,r*se);
         memset (((char*)p)+oc*se, 0, (r-oc)*se);
     }

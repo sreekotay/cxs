@@ -217,6 +217,7 @@ int xs_fileinfo_get(xs_fileinfo** fip, const char *path, int load_data) {
     int result;
     time_t ct = time(0);
     if (fip==0) return -1;
+    assert(path);
     
     //does it exists?
     xs_fileinfo_global_lockstatus(0, 1);
