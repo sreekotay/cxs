@@ -5,6 +5,7 @@
 #define _xs_SERVER_H_
 
 #include "xs_connection.h"
+#include "xs_base64.h"
 
 typedef struct xs_server_ctx        xs_server_ctx;
 
@@ -12,6 +13,7 @@ typedef struct xs_server_ctx        xs_server_ctx;
 // function declarations
 // =================================================================================================================
 xs_server_ctx*          xs_server_create            (const char* rel_path, const char* root_path, xs_async_callback* p);
+void					xs_server_auth_file			(xs_server_ctx* ctx, const char* rel_path, const char* root_path);
 int                     xs_server_listen            (xs_server_ctx* ctx, int port, xs_async_callback* cb);
 int                     xs_server_listen_ssl        (xs_server_ctx* ctx, int port, xs_async_callback* cb, const char* privateKeyPem, const char* certPem, const char* certChainPem);
 int                     xs_server_active            (xs_server_ctx* ctx);       //returns >0 if active
@@ -25,9 +27,9 @@ int                     xs_server_terminate_all     ();
 
 
 int                     xs_server_handlerequest     (xs_server_ctx* ctx, xs_conn* conn);
+int						xs_server_auth_request		(xs_server_ctx* ctx, xs_conn* conn);
 
 #endif //header
-
 
 
 
@@ -53,6 +55,7 @@ int                     xs_server_handlerequest     (xs_server_ctx* ctx, xs_conn
 struct xs_server_ctx {
     char server_name[PATH_MAX];
     char document_root[PATH_MAX];
+	char* auth_file;
     struct xs_async_connect* xas;
     //xs_queue writeq;
 };
@@ -635,6 +638,12 @@ int xs_server_handlerequest(xs_server_ctx* ctx, xs_conn* conn) {
     // request
     //====================
     if (h && (!strcmp(h, "GET") || !strcmp(h, "HEAD"))) {
+
+        if(xs_server_auth_request(ctx, conn) != 0) {
+            xs_conn_write_httperror (conn, 401, "Not Authorized\r\nWWW-Authenticate: Basic", "");
+            return exs_Conn_Close;
+        }
+
         if (0)                         
             xs_conn_httplogaccess (conn, xs_conn_write_httperror (conn, 200, "OK", "simple"));
         else if (1) {
@@ -654,6 +663,66 @@ int xs_server_handlerequest(xs_server_ctx* ctx, xs_conn* conn) {
     return err;
 }
 
+int xs_server_auth_request(xs_server_ctx* ctx, xs_conn* conn) {
+    int ret=-1;
+    const xs_httpreq* req;
+    const char *a, *pass, *cur, *encrypted;
+    char* authfile;
+    char plaintext[256], salt[3];
+    base64_decodestate b64state;
+
+    if (!ctx->auth_file) return 0;
+	
+    req = xs_conn_getreq (conn);
+    a = xs_http_getheader (req, "Authorization");
+
+    if (!a) return ret;
+
+    if (strncmp (a, "Basic", 5) == 0) {
+	    // advance to beginning of encoded data
+        a += 6 * sizeof(char);	
+
+        // decode
+        base64_init_decodestate (&b64state);
+        base64_decode_block (a, strlen(a), plaintext, &b64state);           // TODO: buffer overrun vulnerability? 
+
+        // find password after colon
+        pass = strchr (plaintext, ':');
+        if (pass == 0) return ret;
+        pass++;
+
+        authfile = xs_strdup(ctx->auth_file); // cause strtok is destructive
+
+        // locate user in htpasswd file
+        cur = strtok (authfile, "\n\r");
+        while (cur != NULL) {
+            if (strncmp (cur, plaintext, pass - plaintext - 1) == 0) {
+                // found user
+                // advance cur to point to salt
+                cur = strchr (cur, ':') + 1;
+                strncpy (salt, cur, 2);
+                salt[2]=0;
+
+                // encrypt the plaintext password using the salt from the password file
+                encrypted = xs_DES_crypt (pass, salt);
+                if (strcmp (encrypted, cur) == 0) {
+                    // great success!
+                    ret = 0;
+                    break;
+                }
+            }
+	        cur = strtok (NULL, "\n\r");
+        }
+
+        free(authfile);
+    }
+    else if (strncmp(a, "Digest", 6) == 0) {
+        return ret;	// we'll support Digest here later...
+    }
+    
+    return ret;
+}
+
 
 // ==================================================
 //  core server mgmt
@@ -666,11 +735,30 @@ xs_server_ctx* xs_server_create(const char* rel_path, const char* root_path, xs_
     xs_async_setuserdata(xas, ctx);
     ctx->xas = xas;
     xs_async_setcallback (xas, p);
+	ctx->auth_file=0;
 
     xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
     xs_arr_add (xs_server_ctx*, gserverlist, &ctx, 1); 
     xs_atomic_spin (xs_atomic_swap(gserverlistlock,1,0)!=0);
     return ctx;
+}
+
+void xs_server_auth_file(xs_server_ctx* ctx, const char* rel_path, const char* root_path) {
+    xs_fileinfo* fi;
+    char fd[MAX_PATH];
+
+    xs_path_setabsolute (fd, MAX_PATH, root_path, rel_path);
+    if(xs_fileinfo_get (&fi, fd, 1)) return;
+    if(!fi->size) return;
+
+    xs_fileinfo_lock (fi);
+
+    ctx->auth_file = (char*) malloc(fi->size+1);
+    memcpy(ctx->auth_file, fi->data, fi->size);
+    ctx->auth_file[fi->size] = 0;
+
+    xs_fileinfo_unlock (fi);
+    xs_fileinfo_unloaddata (fi);
 }
 
 xs_async_connect* xs_server_xas (xs_server_ctx* ctx) {
@@ -735,6 +823,7 @@ xs_server_ctx* xs_server_destroy (xs_server_ctx* ctx) {
     if (ctx==0) return 0;
     xs_server_stop(ctx);
     ctx->xas = xs_async_destroy (ctx->xas);
+	if(ctx->auth_file) free(ctx->auth_file);
     xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
     for (i=0; i<xs_arr_count (gserverlist) && xs_arr(xs_server_ctx*, gserverlist, i)!=ctx; i++)  {}
     if (i<xs_arr_count (gserverlist)) {
