@@ -13,7 +13,7 @@ typedef struct xs_server_ctx        xs_server_ctx;
 // function declarations
 // =================================================================================================================
 xs_server_ctx*          xs_server_create            (const char* rel_path, const char* root_path, xs_async_callback* p);
-void					xs_server_auth_file			(xs_server_ctx* ctx, const char* rel_path, const char* root_path);
+void                    xs_server_auth_file         (xs_server_ctx* ctx, const char* rel_path, const char* root_path);
 int                     xs_server_listen            (xs_server_ctx* ctx, int port, xs_async_callback* cb);
 int                     xs_server_listen_ssl        (xs_server_ctx* ctx, int port, xs_async_callback* cb, const char* privateKeyPem, const char* certPem, const char* certChainPem);
 int                     xs_server_active            (xs_server_ctx* ctx);       //returns >0 if active
@@ -27,7 +27,7 @@ int                     xs_server_terminate_all     ();
 
 
 int                     xs_server_handlerequest     (xs_server_ctx* ctx, xs_conn* conn);
-int						xs_server_auth_request		(xs_server_ctx* ctx, xs_conn* conn);
+int                     xs_server_auth_request      (xs_server_ctx* ctx, xs_conn* conn);
 
 #endif //header
 
@@ -55,7 +55,7 @@ int						xs_server_auth_request		(xs_server_ctx* ctx, xs_conn* conn);
 struct xs_server_ctx {
     char server_name[PATH_MAX];
     char document_root[PATH_MAX];
-	char* auth_file;
+    char* auth_file;
     struct xs_async_connect* xas;
     //xs_queue writeq;
 };
@@ -735,7 +735,7 @@ xs_server_ctx* xs_server_create(const char* rel_path, const char* root_path, xs_
     xs_async_setuserdata(xas, ctx);
     ctx->xas = xas;
     xs_async_setcallback (xas, p);
-	ctx->auth_file=0;
+    ctx->auth_file=0;
 
     xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
     xs_arr_add (xs_server_ctx*, gserverlist, &ctx, 1); 
@@ -823,7 +823,7 @@ xs_server_ctx* xs_server_destroy (xs_server_ctx* ctx) {
     if (ctx==0) return 0;
     xs_server_stop(ctx);
     ctx->xas = xs_async_destroy (ctx->xas);
-	if(ctx->auth_file) free(ctx->auth_file);
+    if(ctx->auth_file) free(ctx->auth_file);
     xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
     for (i=0; i<xs_arr_count (gserverlist) && xs_arr(xs_server_ctx*, gserverlist, i)!=ctx; i++)  {}
     if (i<xs_arr_count (gserverlist)) {
