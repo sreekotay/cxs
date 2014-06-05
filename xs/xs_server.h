@@ -5,7 +5,6 @@
 #define _xs_SERVER_H_
 
 #include "xs_connection.h"
-#include "xs_base64.h"
 
 typedef struct xs_server_ctx        xs_server_ctx;
 
@@ -506,7 +505,6 @@ int xs_server_auth_request(xs_server_ctx* ctx, xs_conn* conn) {
     const char *a, *pass, *cur, *encrypted;
     char* authfile;
     char plaintext[256], salt[3];
-    base64_decodestate b64state;
 	
     req = xs_conn_getreq (conn);
     a = xs_http_getheader (req, "Authorization");
@@ -518,9 +516,7 @@ int xs_server_auth_request(xs_server_ctx* ctx, xs_conn* conn) {
         a += 6 * sizeof(char);	
 
         // decode
-        base64_init_decodestate (&b64state);
-        len = base64_decode_block (a, strlen(a), plaintext, &b64state);           // TODO: buffer overrun vulnerability? 
-        plaintext[len] = 0;
+        xs_b64_decode (plaintext, sizeof(plaintext), a, strlen(a));
 
         // find password after colon
         pass = strchr (plaintext, ':');

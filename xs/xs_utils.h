@@ -27,6 +27,7 @@ static int              xs_tohex            (int v, int upper);
 static int              xs_strappend        (char* d, int n, const char* s);
 static int              xs_strlappend       (char* d, int n, const char* s, int l);
 static int              xs_b64_encode       (char *dst, const unsigned char *src, int count);
+static int              xs_b64_decode       (char *dst, int dstLen, const unsigned char* src, int count);
 xsuint32                xs_rand             ();
 static xsuint32         xs_rand_i           (int range);
 #define                 xs_rot32(x,k)       ((((xsuint32)x)<<(k))|(((xsuint32)x)>>(32-(k))))
@@ -158,6 +159,41 @@ static int xs_b64_encode(char *dst, const unsigned char *src, int count) {
     while (j&3) dst[j++] = '=';
     dst[j] = 0; //terminate
     return j;
+}
+
+static int xs_b64_decode(char *dst, int dstLen, const unsigned char* src, int count) {
+    int len=0, i, s1, s2, s3, s4, d1, d2, d3;
+    const char b64_tab[] = {
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 
+        0,0,0,0,0,0,0,0,0,0,0,
+        62,-1,-1,-1,63,52,53,54,55,56,57,58,59,60,61,-1,
+        -1,-1,-2,-1,-1,-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+        10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,
+        -1,-1,-1,-1,-1,-1,26,27,28,29,30,31,32,33,34,35,
+        36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,
+        0, 0, 0, 0,       
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+    };
+
+    for (i=0; i<count; i+=4 ) {
+       if (len>dstLen) return 0;
+       s1 = b64_tab [*src++];   s2 = b64_tab [*src++];
+       s3 = b64_tab [*src++];   s4 = b64_tab [*src++];
+    
+       d1= ((s1 & 0x3f) << 2) | ((s2 & 0x30) >> 4);
+       d2= ((s2 & 0x0f) << 4) | ((s3 & 0x3c) >> 2);
+       d3= ((s3 & 0x03) << 6) | ((s4 & 0x3f) >> 0);
+    
+       dst[len++] = d1;  if (s3==99) break;      
+       dst[len++] = d2;  if (s4==99) break;
+       dst[len++] = d3;
+    }
+    if (len<dstLen) dst[len] = 0; //terminate
+    return len;
 }
 
 // =================================================================================================================
