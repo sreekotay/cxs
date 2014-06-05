@@ -85,6 +85,7 @@
     <ClInclude Include="..\..\xs\khash.h" />
     <ClInclude Include="..\..\xs\xs_arr.h" />
     <ClInclude Include="..\..\xs\xs_atomic.h" />
+    <ClInclude Include="..\..\xs\xs_base64.h" />
     <ClInclude Include="..\..\xs\xs_compress.h" />
     <ClInclude Include="..\..\xs\xs_connection.h" />
     <ClInclude Include="..\..\xs\xs_crc.h" />
@@ -104,7 +105,6 @@
     <ClInclude Include="..\..\xs\xs_startup.h" />
     <ClInclude Include="..\..\xs\xs_types.h" />
     <ClInclude Include="..\..\xs\xs_utils.h" />
-    <ClInclude Include="..\..\xs_base64.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

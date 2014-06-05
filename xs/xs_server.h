@@ -580,9 +580,9 @@ xs_server_ctx* xs_server_create(const char* rel_path, const char* root_path, xs_
 
 void xs_server_auth_file(xs_server_ctx* ctx, const char* rel_path, const char* root_path) {
     xs_fileinfo* fi;
-    char fd[MAX_PATH];
+    char fd[PATH_MAX];
 
-    xs_path_setabsolute (fd, MAX_PATH, root_path, rel_path);
+    xs_path_setabsolute (fd, PATH_MAX, root_path, rel_path);
     if(xs_fileinfo_get (&fi, fd, 1)) return;
     if(!fi->size) return;
 
