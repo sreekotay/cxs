@@ -501,7 +501,7 @@ int xs_server_handlerequest(xs_server_ctx* ctx, xs_conn* conn) {
 }
 
 int xs_server_auth_request(xs_server_ctx* ctx, xs_conn* conn) {
-    int ret=-1;
+    int ret=-1, len;
     const xs_httpreq* req;
     const char *a, *pass, *cur, *encrypted;
     char* authfile;
@@ -519,7 +519,8 @@ int xs_server_auth_request(xs_server_ctx* ctx, xs_conn* conn) {
 
         // decode
         base64_init_decodestate (&b64state);
-        base64_decode_block (a, strlen(a), plaintext, &b64state);           // TODO: buffer overrun vulnerability? 
+        len = base64_decode_block (a, strlen(a), plaintext, &b64state);           // TODO: buffer overrun vulnerability? 
+        plaintext[len] = 0;
 
         // find password after colon
         pass = strchr (plaintext, ':');
