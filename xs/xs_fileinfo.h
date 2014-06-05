@@ -108,7 +108,6 @@ int xs_stat(const char* path, xs_fileinfo* filep) {
     return filep->stat_ret;
 }
 
-//#define _old_file_stuff_
 
 
 KHASH_MAP_INIT_STR(statptr, xs_fileinfo*);
@@ -154,17 +153,13 @@ void xs_fileinfo_global_lockstatus(int oldstatus, int newstatus) {
 }
 
 void xs_fileinfo_lock(xs_fileinfo* fi) {
-#ifndef _old_file_stuff_
     xs_atomic_spin_do (fi->readcount==0 && fi->status!=10, xfi_printf ("yield file\n"));
     xs_atomic_add (fi->readcount, 1);
-#endif
 }
 
 void xs_fileinfo_unlock(xs_fileinfo* fi) {
-#ifndef _old_file_stuff_
     xs_atomic_spin_do (fi->readcount==0 && fi->status!=10, xfi_printf ("yield file\n"));
     xs_atomic_add (fi->readcount, -1);
-#endif
 }
 
 

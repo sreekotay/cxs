@@ -402,7 +402,7 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
 
 xs_async_connect* launch_connects(bench* bn, int concurrent, int total) {
     int err=0, i;
-    xs_async_connect* xas=xs_async_create (8, benchmark_cb);
+    xs_async_connect* xas=xs_async_create (concurrent, benchmark_cb);
     xs_conn* conn=0;
     bench_tl* btl = calloc(sizeof(bench_tl), 1);
     btl->bn = bn;
