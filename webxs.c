@@ -60,6 +60,7 @@ int main(int argc, char *argv[]) {
     
         //start server and connections
         ctx = xs_server_create(".", argv[0], server_handler);
+        //xs_server_auth_file(ctx, ".", "passwd"); // <--- replace with your htpasswd file
         xas = xs_server_xas(ctx); 
         if (accesslog==0) xs_logger_level(exs_Log_Error, exs_Log_Info);
 

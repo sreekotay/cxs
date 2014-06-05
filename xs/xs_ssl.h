@@ -34,6 +34,7 @@ char            xs_SSL_protocol         (SSL* ssl, char* str, int maxlen);//call
 int             xs_SSL_read             (SSL *ssl, void *buff, int len);
 int             xs_SSL_write            (SSL *ssl, const void *buff, int len);
 char            xs_SSL_free             (SSL **ssl);
+char *          xs_DES_crypt            (const char *buf,const char *salt);
 
 #endif //_xs_SSL_H_
 
@@ -81,6 +82,7 @@ char            xs_SSL_free             (SSL **ssl);
 #ifdef _xs_NO_SSL_DL_
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/des.h>
 #else //_xs_NO_SSL_DL_
 typedef struct SSL_method_st                    SSL_METHOD;
 
@@ -133,6 +135,7 @@ struct xs_SSL_func {
 #define CRYPTO_set_id_callback                  (* (void (*)(unsigned long (*)(void))) xs_crypto_sw[2].ptr)
 #define ERR_get_error                           (* (unsigned long (*)(void)) xs_crypto_sw[3].ptr)
 #define ERR_error_string                        (* (char * (*)(unsigned long,char *)) xs_crypto_sw[4].ptr)
+#define DES_crypt                               (* (char * (*)(const char * buf, const char *salt)) xs_crypto_sw[5].ptr)
 
 
 // set_xs_SSL_option() function updates this array.
@@ -177,6 +180,7 @@ static struct xs_SSL_func xs_crypto_sw[] = {
   {"CRYPTO_set_id_callback", NULL},
   {"ERR_get_error",  NULL},
   {"ERR_error_string", NULL},
+  {"DES_crypt", NULL},
   {NULL,    NULL}
 };
 
@@ -410,6 +414,10 @@ void xs_SSL_uninitialize() {
   if (xs_crypto_lib) dlclose (xs_crypto_lib);
   xs_SSL_lib = xs_crypto_lib = 0;
 #endif
+}
+
+char *xs_DES_crypt(const char *buf,const char *salt) {
+    return DES_crypt(buf, salt);
 }
 
 #endif // _xs_SSL_IMPL_
