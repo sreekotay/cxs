@@ -108,6 +108,7 @@ int xs_stat(const char* path, xs_fileinfo* filep) {
     return filep->stat_ret;
 }
 
+//#define _old_file_stuff_
 
 
 KHASH_MAP_INIT_STR(statptr, xs_fileinfo*);
@@ -166,6 +167,7 @@ void xs_fileinfo_unlock(xs_fileinfo* fi) {
 
 int xs_fileinfo_loaddata(xs_fileinfo* fi, const char *path) { //assumes valid xs_fileinfo* and fi->status==1
     int maxsize = 10000000, f, locallock = fi->status;
+    if (fi && fi->status==10 && path==0) {xs_atomic_spin(xs_atomic_swap(fi->status, 10, 0)==10); locallock = 0;}
     if (fi==0 || fi->stat_ret || fi->status>1 || fi->is_directory) return -1;
 
     //status is 2
