@@ -14,6 +14,8 @@ static char*            xs_strlcpy          (char *d, const char *s, size_t n);
 static char*            xs_strlcat          (char *d, const char *s, size_t n);
 static char*            xs_strndup          (const char *s, size_t n);
 static char*            xs_strdup           (const char *str);          
+static int              xs_strcmp           (const char *s1, const char *s2);
+static int              xs_strncmp          (const char *s1, const char *s2, size_t n);
 static int              xs_strncmp_case     (const char *s1, const char *s2, size_t n);
 static int              xs_strcmp_case      (const char *s1, const char *s2);
 static const char*      xs_strstr_case      (const char *bstr, const char *sstr);
@@ -188,13 +190,32 @@ static int xs_b64_decode(char *dst, int dstLen, const unsigned char* src, int co
        d2= ((s2 & 0x0f) << 4) | ((s3 & 0x3c) >> 2);
        d3= ((s3 & 0x03) << 6) | ((s4 & 0x3f) >> 0);
     
-       dst[len++] = d1;  if (s3==99) break;      
-       dst[len++] = d2;  if (s4==99) break;
-       dst[len++] = d3;
+       dst[len++] = (char)d1;  if (s3==99) break;      
+       dst[len++] = (char)d2;  if (s4==99) break;
+       dst[len++] = (char)d3;
     }
     if (len<dstLen) dst[len] = 0; //terminate
     return len;
 }
+
+/*
+#define uint8_t             xsuint8
+#define u_int8_t            xsuint8
+#define uint32_t            xsuint32
+#define u_int32_t           xsuint32
+#define u_int16_t           xsuint16
+#define uint8               xsuint8
+#define uint16              xsuint16
+#define uint32              xsuint32
+#define _PASSWORD_LEN       256
+#define timingsafe_bcmp     memcmp
+#define snprintf            xs_sprintf
+#define strlcpy             xs_strlcpy
+#define explicit_bzero(a,b) memset(a,0,b)
+#include "blowfish/bcrypt.c"
+#include "blowfish/blf.c"
+//#include "blowfish/bsd-arc4random.c"
+*/
 
 // =================================================================================================================
 // xs_itoa

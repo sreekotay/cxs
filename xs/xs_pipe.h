@@ -38,7 +38,7 @@ int xs_pipe_read    (xs_pipe* p, char* buf, int len);
 int xs_pipe_open(xs_pipe* p) {
 #if defined WIN32 && defined xs_SOCKET_PIPE
     struct sockaddr_in sa = {0};
-    int len = sizeof(sa), sock, a=65535;
+    int len = sizeof(sa), sock;
     struct linger linger;
     linger.l_onoff = 1;
     linger.l_linger = 1;

@@ -130,7 +130,7 @@ xs_json* xs_json_destroy(xs_json* js) {
 // ====================================================================================================================
 int xs_json_next(xs_json* js, xs_json_tag* tag, int permissive) {
     char* pend = js->mend, *sptr, *nptr, *vptr, hasEscape;
-    int sv;
+    int sv=0;
 
     //are we done?
 	if (js==0 || tag==0)								return -1;
@@ -143,7 +143,8 @@ int xs_json_next(xs_json* js, xs_json_tag* tag, int permissive) {
     if (nptr==0 || nptr<=sptr)		return xs_arr_count(js->mstack)==1 ? exs_JSON_EndOfFile : exs_JSON_Incomplete;
 
 	tag->ptr = 0;
-	tag->type = tag->stype = tag->i = tag->len = 0;
+	tag->type = tag->stype = 0;
+    tag->i = tag->len = 0;
 	tag->has_escape = hasEscape;
 
 	
@@ -314,7 +315,7 @@ int  xs_json_unescape (char* dst, int dlen, const char* src, int slen) {
 					hb = xs_fromhex(s[1]);	 if (hb<0)	return exs_JSON_Err_Syntax;
 					hc = xs_fromhex(s[2]);	 if (hc<0)	return exs_JSON_Err_Syntax;
 					hd = xs_fromhex(s[3]);	 if (hd<0)	return exs_JSON_Err_Syntax;
-					*d++ = (ha<<12) + (hb<<8) + (hc<<4) + hd;
+					*d++ = (char)((ha<<12) + (hb<<8) + (hc<<4) + hd); //$$$SREE --- TODO: need to write UTF8 char here
 					s+=3; //4th will be added below
 					break;
 				default:

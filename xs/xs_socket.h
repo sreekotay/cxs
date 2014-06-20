@@ -87,7 +87,7 @@ int             xs_sock_avail                   (int sock, int inevent);
 int             xs_sock_closeonexec             (int sock);
 char*           xs_sock_addrtostr               (char *buf, size_t len, const xs_sockaddr* sa);
 char            xs_sock_wouldblock              (int err);
-int             xs_sock_err                     ();
+int             xs_sock_err                     (void);
 
 #define         xs_sock_valid(a)                (((int)(a))>0)
 #define         xs_sock_invalid(a)              (((int)(a))<=0)
@@ -391,7 +391,7 @@ void* xs_pollfd_getsocket_userdata(xs_pollfd* xp, int xptoken) {
 
 int xs_pollfd_setsocket_events(xs_pollfd* xp, int xptoken, int events) {
     if ((xptoken=xptok_ind(xp,xptoken))<0) return -50;
-    xp->pfd[xptoken].events = events;
+    xp->pfd[xptoken].events = (xsint16)events;
     return 0;
 }
 
@@ -464,7 +464,6 @@ void xs_pollfd_internaladd(struct xs_pollfd* xp, struct xs_queuesock* qsp) {
 //  core function
 // =================================================================================================================
 void* xs_Pollthread3 (struct xs_pollfd* xp) {
-    time_t ct=0, pt=0; 
     xs_queue* qp = &xp->ctx->acceptqueue;
     struct xs_queuesock qs={0};
     int rret = 0;
@@ -982,14 +981,14 @@ int xs_sock_settimeout(int sock, int milliseconds) {
 }
 
 int  xs_sock_setnonblocking(int sock, unsigned long on) {return ioctlsocket(sock, FIONBIO, &on);}
-int  xs_sock_settcpfastopen(int sockfd)                 {return -1;}
-int  xs_sock_settcpcork(int sockfd, int on)             {return -1;}
-int  xs_sock_settcpnopush(int sockfd, int on)           {return -1;}
-int  xs_sock_err()                                      {return WSAGetLastError();}
+int  xs_sock_settcpfastopen(int s)                      {s; return -1;}
+int  xs_sock_settcpcork(int s, int d)                   {s; d; return -1;}
+int  xs_sock_settcpnopush(int s, int d)                 {s; d; return -1;}
+int  xs_sock_err(void)                                  {return WSAGetLastError();}
 char xs_sock_wouldblock(int err)                        {return (err==WSAEWOULDBLOCK);}
 
 #else //_WIN32
-int  xs_sock_err()                                      {return errno;}
+int  xs_sock_err(void)                                  {return errno;}
 char xs_sock_wouldblock(int err)                        {return (err==EWOULDBLOCK) || (err==EAGAIN);}
 int  xs_sock_settimeout(int sock, int milliseconds) {
   struct timeval t;  t.tv_sec = milliseconds/1000;   t.tv_usec = (milliseconds*1000)%1000000;
@@ -1059,7 +1058,7 @@ int xs_sock_avail (int sock, int inevent) {
     int result;
     struct pollfd fd;
     fd.fd = sock;
-    fd.events = inevent;
+    fd.events = (xsint16)inevent;
     fd.revents = 0;
     result = poll(&fd,1,0);
     if (result) return fd.revents;

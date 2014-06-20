@@ -69,10 +69,10 @@ static pid_t xs_process_launch( const char *dir, char *prog,
                                 const xs_process_env* env, 
                                 int pipein, int pipeout) {
 #ifdef WIN32
-    HANDLE curp =  GetCurrentProcess();
+    //HANDLE curp =  GetCurrentProcess();
     STARTUPINFOA si = {0};
     PROCESS_INFORMATION pi = {0};
-    char interp[]="", fulldir[PATH_MAX], cmdline[PATH_MAX];
+    char fulldir[PATH_MAX], cmdline[PATH_MAX];
     int err;
     
     //setup pipes

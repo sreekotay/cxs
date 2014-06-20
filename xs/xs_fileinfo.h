@@ -22,7 +22,7 @@ typedef struct xs_fileinfo{
 
 
 int     xs_stat                 (const char* path, xs_fileinfo* filep);     //portable 'stat' function
-int     xs_fileinfo_init        ();
+int     xs_fileinfo_init        (void);
 int     xs_fileinfo_get         (xs_fileinfo** fip, const char *path, int load_data);
 void    xs_fileinfo_lock        (xs_fileinfo*  fi); //lock function
 void    xs_fileinfo_unlock      (xs_fileinfo*  fi); //lock function
@@ -118,7 +118,7 @@ xs_atomic gxs_statread = 0;
 pthread_rwlock_t gxs_stat_rwlock;
 pthread_mutex_t gxs_statmutex;
 
-int xs_fileinfo_init() {
+int xs_fileinfo_init(void) {
     if (gxs_statptr) return 0;
     gxs_statptr = kh_init_statptr();
     pthread_mutex_init(&gxs_statmutex, 0);

@@ -171,13 +171,13 @@ const char*         xs_server_name          ();
 //  xs_async
 // ======================================================================
 typedef struct xs_async_connect xs_async_connect;
-typedef int (xs_async_callback) (struct xs_async_connect* xas, int message, xs_conn* conn);
+typedef int (xs_async_callback) (struct xs_async_connect* xas, int message, void* messageData, xs_conn* conn);
 
 xs_async_connect*   xs_async_create         (int hintsize, xs_async_callback* proc);
 xs_async_connect*   xs_async_read           (xs_async_connect*, xs_conn*, xs_async_callback* proc); //xs_async_connect may be null
 xs_async_connect*   xs_async_listen         (xs_async_connect*, xs_conn*, xs_async_callback* proc); //xs_async_connect may be null
 xs_async_connect*   xs_async_destroy        (xs_async_connect* );
-int                 xs_async_call           (xs_async_connect* xas, int message, xs_conn* conn);
+int                 xs_async_call           (xs_async_connect* xas, int message, void* messageData, xs_conn* conn);
 void                xs_async_stop           (xs_async_connect* );
 int                 xs_async_active         (xs_async_connect* );
 int                 xs_async_print          (xs_async_connect* );
@@ -297,7 +297,7 @@ const char*         xs_conn_getsockaddrstr (const xs_conn* conn)           {retu
 const xs_sockaddr*  xs_conn_getsockaddr    (const xs_conn* conn)           {return conn ? &conn->sa : 0; }
 void                xs_http_reqfree        (xs_httpreq* req);              //forward declaration
 int                 xs_conn_cachepurge     (xs_conn* conn);                //forward declaration
-xs_conn*     xs_conn_create()   {xs_conn* conn; xs_logger_counter_add (1, 1); conn = (xs_conn*)calloc(sizeof(xs_conn), 1); if (conn==0) return 0; conn->token=-1;  return conn;}
+xs_conn*     xs_conn_create(void)   {xs_conn* conn; xs_logger_counter_add (1, 1); conn = (xs_conn*)calloc(sizeof(xs_conn), 1); if (conn==0) return 0; conn->token=-1;  return conn;}
 xs_conn*     xs_conn_close(xs_conn *conn) {
     struct xs_httpreq *req, *hold;
     if (conn==0) return 0;
@@ -689,7 +689,7 @@ int xs_websocket_response(xs_conn *conn) {
 
 size_t xs_conn_httpwebsocket (xs_conn* conn, const char* host, const char* path) {
     char sec_key[]="sr33k0t2ypZYKUwIrsGYaw==";
-    if (conn==0 || path==0) {if (conn) conn->errnum=exs_Error_InvalidRequest; return -50;}
+    if (conn==0 || path==0) {if (conn) conn->errnum=exs_Error_InvalidRequest; return (size_t)-50;}
     if (host==0) host = conn->host;
     return xs_conn_printf_header (conn, 
                     "GET %s HTTP/1.1\r\n"
@@ -1068,8 +1068,8 @@ int xs_conn_chunkready(xs_conn * conn) {
 // ==============================================
 size_t xs_conn_httprequest (xs_conn* conn, const char* host, const char* method, const char* path) {
     size_t result;
-    if (conn==0 || method==0 || path==0)     {conn->errnum=exs_Error_InvalidRequest; return -50;}
-    if (xs_http_validmethod(method)==0)      {conn->errnum=exs_Error_InvalidRequest; return -1;}
+    if (conn==0 || method==0 || path==0)     {conn->errnum=exs_Error_InvalidRequest; return (size_t)-50;}
+    if (xs_http_validmethod(method)==0)      {conn->errnum=exs_Error_InvalidRequest; return (size_t)-1;}
     if (host==0) host = conn->host;
     result = xs_conn_printf_header (conn, 
                     host ? 
@@ -1102,13 +1102,13 @@ size_t xs_conn_followredirect (xs_conn** reconn, xs_conn* conn, const char* meth
 
     //check redirect
     h = xs_http_getheader(req, "Location");
-    if (h==0) {conn->errnum = exs_Error_BadRedirect; return -1;}
+    if (h==0) {conn->errnum = exs_Error_BadRedirect; return (size_t)-1;}
 
     if ((uri=xs_uri_create(h, 0))==0 || //fail if no valid uri, or its not an understood uri
         (uri->protocol && xs_strcmp_case(uri->protocol, "http://") && xs_strcmp_case(uri->protocol, "https://")
                        && xs_strcmp_case(uri->protocol, "ws://")   && xs_strcmp_case(uri->protocol, "wss://"))) {
         conn->errnum = exs_Error_BadRedirect; 
-        return -50;
+        return (size_t)-50;
     }
 
     //relative path
@@ -1121,7 +1121,7 @@ size_t xs_conn_followredirect (xs_conn** reconn, xs_conn* conn, const char* meth
     err = xs_conn_open (reconn, uri->host ? uri->host : conn->host,
                                 uri->port ? uri->port : conn->port, 
                                 uri->protocol ? (xs_strcmp_case(uri->protocol, "https://")==0 || xs_strcmp_case(uri->protocol, "wss://")==0) : conn->is_ssl);
-    if (err) {conn->errnum = exs_Error_BadRedirect; return -10;}
+    if (err) {conn->errnum = exs_Error_BadRedirect; return (size_t)-10;}
 
     //new request
     result = xs_conn_httprequest (*reconn, 0, method, uri->path);
@@ -1142,7 +1142,7 @@ size_t xs_conn_read (xs_conn* conn, void* buf, size_t len, int* reread) {
     if (n<0)        xs_conn_seterr(conn);
     else if (n==0)  conn->errnum = exs_Conn_Close; //graceful close
     else            conn->errnum = 0;
-    if (reread)     *reread = (n==len) && (conn->errnum==0);
+    if (reread)     *reread = ((size_t)n==len) && (conn->errnum==0);
     if (n>0 && conn->proto==0)  {//check only the first time
         if (conn->ssl) xs_SSL_protocol (conn->ssl, conn->sslproto, sizeof(conn->sslproto));
         conn->proto = 1;
@@ -1193,7 +1193,7 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
         if (req && conn->req==req)  {req->next = conn->freereq; conn->freereq = req; conn->req = 0;  conn->lastreq = 0;} //$$$SREE NOT RIGHT!!!!
         else if (req)               {assert(0);}
         err = xs_http_createreq(conn, n);
-        if (err) {conn->errnum = conn->errnum?conn->errnum:err; return -1;}
+        if (err) {conn->errnum = conn->errnum?conn->errnum:err; return (size_t)-1;}
         req = conn->req; assert(req);
         //conn->datalen=0; if (req) req->reqlen = 0; return n; // for debugging
         if (conn->upgrade) req->upgrade = conn->upgrade; //$$$SREE -- we want to mark it as special -- not sure this is the right semantic
@@ -1203,7 +1203,7 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
             if ((req->method    && (err=xs_websocket_response(conn))<0) ||   //<0 because >0 just means its not a websocket
                 (req->method==0 && (err=xs_websocket_accept  (conn))<0)) {
                 conn->errnum = exs_Error_WS_InvalidSecKey;
-                return -10; 
+                return (size_t)-10; 
             }
             if (reread) *reread=(conn->datalen>conn->consumed);
             return _xschr_retvalue_;  //finished with header
@@ -1289,7 +1289,7 @@ int xs_conn_httplogaccess (xs_conn* conn, size_t result) {
 char xs_conn_writable (xs_conn* conn){
     int sock = conn ? conn->sock : 0;
     int w = sock ? ((xs_sock_avail(sock, POLLOUT)&POLLOUT)!=0) : 0;
-    return w;
+    return (char)w;
 }
 size_t xs_conn_header_done (xs_conn* conn, int hasBody) {
     return xs_conn_write_ (conn, "\r\n", 2, hasBody ? MSG_MORE : 0);
@@ -1374,12 +1374,12 @@ size_t xs_conn_write_ (xs_conn* conn, const void* buf, size_t len, int flags) {
     #ifdef TCP_CORK
     #define _xs_tcpcork(a)     if (conn->corked!=a) xs_sock_settcpcork  (conn->sock, (conn->corked=a));
     #else
-    #define _xs_tcpcork(a) 
+    #define _xs_tcpcork(a)     do{}while(0)
     #endif
     #if !(defined TCP_CORK) && defined TCP_NOPUSH
     #define _xs_tcpnopush(a)   if (conn->corked!=a) xs_sock_settcpnopush (conn->sock, (conn->corked=a));
     #else
-    #define _xs_tcpnopush(a) 
+    #define _xs_tcpnopush(a)   do{}while(0)
     #endif
 
     if (a==1) _xs_tcpcork(1);
@@ -1478,8 +1478,9 @@ int xs_conn_printf_chunked(xs_conn *conn, const char *fmt, ...) {
     return len;
 }
 
-int xs_async_write_filedata_cb (xs_async_connect* xas, int message, xs_conn* conn) {
+int xs_async_write_filedata_cb (xs_async_connect* xas, int message, void* messageData, xs_conn* conn) {
     xs_httpreq* req = xs_conn_getreq(conn);
+    message; messageData;
     if (req==0) return -1;
     xs_async_write_filedata (xas, conn, 0, req->counter, req->total);
     return 0;
@@ -1685,20 +1686,20 @@ int xs_async_handler(struct xs_pollfd* xp, int message, int sockfd, int xptoken,
             conn->token = xptoken;
             if (conn->xp==0) conn->xp = xs_pollfd_inc(xp);
             xs_pollfd_setsocket_userdata(xp, xptoken, conn);
-            if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_New, conn);
+            if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_New, 0, conn);
         break;
 
         case exs_pollfd_Idle:
-            if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_Idle, conn);
+            if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_Idle, 0, conn);
         break;
 
         case exs_pollfd_Read:
-          if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_Read, conn);
+          if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_Read, 0, conn);
         break;
 
         case exs_pollfd_Write:
             if (xs_conn_cachepurge(conn)==0) {
-                if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_Write, conn);
+                if (cb&&xas->stop==0) err = (*cb) (xas, exs_Conn_Write, 0, conn);
                 if (err!=exs_Conn_Write) xs_pollfd_setsocket_events (xp, xptoken, POLLIN);
                 }
         break;
@@ -1706,7 +1707,7 @@ int xs_async_handler(struct xs_pollfd* xp, int message, int sockfd, int xptoken,
         case exs_pollfd_Error:
         case exs_pollfd_Delete:
             if (xs_conn_error(conn)==0) xs_conn_seterr(conn);
-            if (cb) err = (*cb) (xas, message==exs_pollfd_Error ? exs_Conn_Error : exs_Conn_Close, conn);
+            if (cb) err = (*cb) (xas, message==exs_pollfd_Error ? exs_Conn_Error : exs_Conn_Close, 0, conn);
             if (err!=exs_Conn_Close) err =exs_Conn_Close;
         break;
     }
@@ -1730,8 +1731,8 @@ int xs_async_handler(struct xs_pollfd* xp, int message, int sockfd, int xptoken,
                     //send error and close msgs, 
                     if (conn->errnum==0) conn->errnum = exs_Conn_Close;
                     if (message!=exs_pollfd_Error && message!=exs_pollfd_Delete) {
-                        if (xs_conn_error(conn)) (*cb) (xas, exs_Conn_Error, conn);
-                        (*cb) (xas, exs_Conn_Close, conn);
+                        if (xs_conn_error(conn)) (*cb) (xas, exs_Conn_Error, 0, conn);
+                        (*cb) (xas, exs_Conn_Close, 0, conn);
                     }
                     conn=xs_conn_dec(conn);
                 }
@@ -1755,9 +1756,10 @@ typedef struct xs_async_workdata {
 
 
 void xs_async_cb (xs_queue* qs, xs_async_workdata *wdp, xs_async_connect* xas) {
+    qs;
     if (wdp && wdp->conn) {
-        if (wdp->proc)  (*wdp->proc)  (xas, wdp->message, wdp->conn);
-        else            xs_async_call (xas, wdp->message, wdp->conn);
+        if (wdp->proc)  (*wdp->proc)  (xas, wdp->message, 0, wdp->conn);
+        else            xs_async_call (xas, wdp->message, 0, wdp->conn);
         xs_conn_dec(wdp->conn);
     }
 }
@@ -1781,20 +1783,20 @@ xs_async_connect*  xs_async_create(int hintsize, xs_async_callback* p) {
     if (xas->th==0)             {xs_pollfd_destroy(xas->xp); free(xas); return 0;}
     xs_queue_create             (&xas->q, sizeof(struct xs_async_workdata), 1024*10, (xs_queue_proc)xs_async_cb, xas);
     xs_queue_launchthreads      (&xas->q, 20, 0);
-    xs_async_call               (xas, exs_XAS_Create, 0);
+    xs_async_call               (xas, exs_XAS_Create, 0, 0);
 
     return xas;
 }
 
-int xs_async_active(struct xs_async_connect* xas)                       {return xas&&xas->stop==0;}
-int xs_async_print(struct xs_async_connect* xas)                        {return xs_pollfd_print (xas->xp);}
-void xs_async_setuserdata(struct xs_async_connect* xas, void* usd)      {if (xas) xas->userdata=usd;}
-void* xs_async_getuserdata(struct xs_async_connect* xas)                {return xas ? xas->userdata : 0;}
-xs_async_callback* xs_async_getcallback(xs_async_connect* xas)          {return xas ? xas->cb : 0;}
-int xs_async_call (xs_async_connect* xas, int message, xs_conn* conn)   {return xas&&conn ? (*conn->cb) (xas, message, conn) : (xas&&xas->cb ? (*xas->cb)(xas, message,0) : 0);}
-void xs_async_setcallback(xs_async_connect* xas, xs_async_callback* p)  {if (xas) xas->cb=p;}
-void xs_async_stop(struct xs_async_connect* xas)                        {if (xas&&xas->stop==0) {xas->stop=-2; xs_async_call(xas,exs_XAS_Destroy,0);}}
-int xs_async_lock (xs_async_connect* xas)                               {return xas&&xas->xp ? xs_pollfd_lock(xas->xp) : -1;}
+int xs_async_active(struct xs_async_connect* xas)                                   {return xas&&xas->stop==0;}
+int xs_async_print(struct xs_async_connect* xas)                                    {return xs_pollfd_print (xas->xp);}
+void xs_async_setuserdata(struct xs_async_connect* xas, void* usd)                  {if (xas) xas->userdata=usd;}
+void* xs_async_getuserdata(struct xs_async_connect* xas)                            {return xas ? xas->userdata : 0;}
+xs_async_callback* xs_async_getcallback(xs_async_connect* xas)                      {return xas ? xas->cb : 0;}
+int xs_async_call (xs_async_connect* xas, int message, void *md, xs_conn* conn)     {return xas&&conn ? (*conn->cb) (xas, message, md, conn) : (xas&&xas->cb ? (*xas->cb)(xas, message, md, 0) : 0);}
+void xs_async_setcallback(xs_async_connect* xas, xs_async_callback* p)               {if (xas) xas->cb=p;}
+void xs_async_stop(struct xs_async_connect* xas)                                     {if (xas&&xas->stop==0) {xas->stop=-2; xs_async_call(xas,exs_XAS_Destroy,0,0);}}
+int xs_async_lock (xs_async_connect* xas)                                            {return xas&&xas->xp ? xs_pollfd_lock(xas->xp) : -1;}
 
 
 struct xs_async_connect* xs_async_destroy(struct xs_async_connect* xas) {
@@ -1976,7 +1978,7 @@ int xs_uri_decode(char* dst, int dlen, const char* src, int slen, char formencod
         if (src[s]==formencoded)            {dst[d++] = ' '; s++;}
         else if (src[s]!='%')               {dst[d++] = src[s++];}
         else if (s+2<slen && d+1<dlen)      {if (xs_fromhex(src[s+1])<0 || xs_fromhex(src[s+2])<0) err=-1;
-                                             else dst[d++] = (xs_fromhex(src[s+1])<<4) + xs_fromhex(src[s+2]); s+=3;}
+                                             else dst[d++] = (char)(xs_fromhex((char)src[s+1])<<4) + (char)xs_fromhex((char)src[s+2]); s+=3;}
         else                                {err=-1; break;}
     }
     if (err==0) {r=slen-s; if(r && d+r<=dlen) {memcpy(dst+d,src+s,r);d+=r;}}
@@ -1996,8 +1998,8 @@ int xs_uri_encode(char* dst, int dlen, const char* src, int slen, char formencod
         else if (d+2<dlen) {
             c = (int)((unsigned int)src[s++]);
             dst[d++] = '%';
-            dst[d++] = xs_tohex(c>>4, 1);
-            dst[d++] = xs_tohex(c&15, 1);
+            dst[d++] = (char)xs_tohex(c>>4, 1);
+            dst[d++] = (char)xs_tohex(c&15, 1);
         }
     }
     dst[d] = 0;

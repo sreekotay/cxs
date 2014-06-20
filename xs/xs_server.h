@@ -11,7 +11,7 @@ typedef struct xs_server_ctx        xs_server_ctx;
 // =================================================================================================================
 // function declarations
 // =================================================================================================================
-xs_server_ctx*          xs_server_create            (const char* rel_path, const char* root_path, xs_async_callback* p);
+xs_server_ctx*          xs_server_create            (void);
 void                    xs_server_auth_file         (xs_server_ctx* ctx, const char* rel_path, const char* root_path);
 int                     xs_server_listen            (xs_server_ctx* ctx, int port, xs_async_callback* cb);
 int                     xs_server_listen_ssl        (xs_server_ctx* ctx, int port, xs_async_callback* cb, const char* privateKeyPem, const char* certPem, const char* certChainPem);
@@ -24,9 +24,11 @@ int                     xs_server_init_all          (int startupstuff);         
 int                     xs_server_stop_all          (int signal, void *dummy);  //callback for signalling -- (0, 0) is fine -- this is internal
 int                     xs_server_terminate_all     ();
 
-
+int                     xs_server_sethandler        (xs_server_ctx* ctx, const char* server_path, xs_async_callback* p, const char* rel_path, const char* root_path);
 int                     xs_server_handlerequest     (xs_server_ctx* ctx, xs_conn* conn);
 int                     xs_server_auth_request      (xs_server_ctx* ctx, xs_conn* conn);
+
+int                     xs_simpleresponse           (xs_conn* conn);            //for performance testing 
 
 #endif //header
 
@@ -365,10 +367,10 @@ size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* pa
     const xs_httpreq* req = xs_conn_getreq(conn);
     xs_fileinfo fd, *fdp=&fd;
     const char* h, *ver;
-    xsuint64 rs, re;
+    xsint64 rs, re;
     size_t result=0;
     char etag[64], range[128]="";
-    int statuscode=200, sock=0, dohdr=1, haverangehdr=0;
+    int statuscode=200, dohdr=1, haverangehdr=0;
     char statusmsg[128]="OK";
 
     //xs_stat(path, &fd);
@@ -385,9 +387,6 @@ size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* pa
         return xs_http_dirresponse (conn, xs_http_get(req, exs_Req_URI), path);
     } else if (0 || xs_http_notmodified(req, fdp)) {
         return xs_conn_write_httperror (conn, 304, "Not Modified", ""); // <---- shortcut out
-        statuscode = 304;
-        xs_strlcpy (statusmsg, "Not Modified", sizeof(statusmsg));
-        dobody = 0;
     }
 
     //lock it
@@ -451,7 +450,7 @@ size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* pa
     if (dobody==1 && (re-rs)!=0) { //note dobody==1 --- allows HEAD requests to specify dobody=2
         if (0) {
             xs_fileinfo_unlock(fdp);
-            xs_async_write_filedata(xas, conn, path, rs, re);
+            xs_async_write_filedata(xas, conn, path, (size_t)rs, (size_t)re);
             xs_fileinfo_lock (fdp);
         } else result += xs_conn_write_filedata (conn, path, fdp, (size_t)rs, (size_t)re, 1);
     }
@@ -462,8 +461,6 @@ size_t xs_http_fileresponse(xs_async_connect* xas, xs_conn* conn, const char* pa
     //success
     return result;
 }
-
-
 
 int xs_server_handlerequest(xs_server_ctx* ctx, xs_conn* conn) {
     int err=0;
@@ -500,7 +497,7 @@ int xs_server_handlerequest(xs_server_ctx* ctx, xs_conn* conn) {
 }
 
 int xs_server_auth_request(xs_server_ctx* ctx, xs_conn* conn) {
-    int ret=-1, len;
+    int ret=-1;
     const xs_httpreq* req;
     const char *a, *pass, *cur, *encrypted;
     char* authfile;
@@ -516,7 +513,7 @@ int xs_server_auth_request(xs_server_ctx* ctx, xs_conn* conn) {
         a += 6 * sizeof(char);	
 
         // decode
-        xs_b64_decode (plaintext, sizeof(plaintext), a, strlen(a));
+        xs_b64_decode (plaintext, sizeof(plaintext), (const xsuint8*)a, strlen(a));
 
         // find password after colon
         pass = strchr (plaintext, ':');
@@ -555,24 +552,59 @@ int xs_server_auth_request(xs_server_ctx* ctx, xs_conn* conn) {
     return ret;
 }
 
+int xs_simpleresponse(xs_conn* conn) {
+    int err=0, rr=0, n;
+    char buf[1024];
+    char msghdr[] = "HTTP/1.1 200 OK\r\n"
+                    "Content-Length: 10\r\n"
+                    "Server: webxs/0.5\r\n"
+                    "Date: Wed, 11 Jun 2014 02:20:26 GMT\r\n"
+                    "Etag: \"52ae0a21.64\"\r\n"
+                    "Content-Type: text/html\r\n"
+                    "Accept-Ranges: bytes\r\n"
+                    "Connection: keep-alive\r\n"
+                    ;
+    while (err==0 && rr) {
+        n = xs_conn_read(conn, buf, sizeof(buf)-1, &rr);
+        err = xs_conn_error (conn);
+        if (err==0) xs_atomic_inc (gscount);
+    }
+    if (err==0) {
+        xs_atomic_inc (gswcount);
+        xs_conn_write_header (conn, msghdr, sizeof(msghdr)-1);
+        xs_conn_header_done (conn, 1);
+        xs_conn_write (conn, "xxxxxxxxxx", 10);
+    } else {
+        if (err != exs_Conn_Close)
+            printf ("error ---------------- %d: %d-%d\n", err, (int)gscount, (int)gswcount);
+    }
+    return err;
+}
+
 
 // ==================================================
 //  core server mgmt
 // ==================================================
-xs_server_ctx* xs_server_create(const char* rel_path, const char* root_path, xs_async_callback* p) {
+xs_server_ctx* xs_server_create(void) {
     xs_server_ctx* ctx = (xs_server_ctx*)calloc(sizeof(xs_server_ctx), 1);
     struct xs_async_connect* xas=xs_async_create(8, 0);
-    xs_strlcpy(ctx->server_name, xs_server_name(), sizeof(ctx->server_name));
-    xs_path_setabsolute (ctx->document_root, sizeof(ctx->document_root), rel_path, root_path);
-    xs_async_setuserdata(xas, ctx);
     ctx->xas = xas;
-    xs_async_setcallback (xas, p);
-    ctx->auth_file=0;
 
     xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
     xs_arr_add (xs_server_ctx*, gserverlist, &ctx, 1); 
     xs_atomic_spin (xs_atomic_swap(gserverlistlock,1,0)!=0);
     return ctx;
+}
+
+int xs_server_sethandler (xs_server_ctx* ctx, const char* server_path, xs_async_callback* p, const char* rel_path, const char* root_path) {
+    if (ctx==0) return -50;
+    if (server_path==0) {
+        xs_strlcpy(ctx->server_name, xs_server_name(), sizeof(ctx->server_name));
+        xs_path_setabsolute  (ctx->document_root, sizeof(ctx->document_root), rel_path, root_path);
+        xs_async_setuserdata (ctx->xas, ctx);
+        xs_async_setcallback (ctx->xas, p);
+    } else return -2;
+    return 0;
 }
 
 void xs_server_auth_file(xs_server_ctx* ctx, const char* rel_path, const char* root_path) {
@@ -674,8 +706,9 @@ int xs_server_init_all(int startupstuff) {
     return 0;
 }
 
-int xs_server_stop_all(int signal, void *dummy) {
+int xs_server_stop_all(int signal, void* dummy) {
     int i;
+    signal; dummy;
     xs_atomic_spin (xs_atomic_swap(gserverlistlock,0,1)!=0);
     for (i=xs_arr_count (gserverlist)-1; i>=0; i--) {
         xs_server_ctx* ctx = xs_arr(xs_server_ctx*, gserverlist, i);

@@ -87,8 +87,9 @@ static int pthread_create_detached (pthread_t* th, void *(*start_routine) (void 
     *th=(pthread_t)_beginthread(xs_threadproc_create_stub, 0, taarg);
     return th ?  0 : -1;
 }
-static int pthread_create (pthread_t* th, void *attr, void *(*start_routine) (void *), void* arg) {
+static int pthread_create (pthread_t* th, void *dummy, void *(*start_routine) (void *), void* arg) {
     xs_taarg* taarg=(xs_taarg*)malloc(sizeof(xs_taarg));
+    dummy; 
     taarg->proc = start_routine;
     taarg->arg = arg;
     *th=(pthread_t)_beginthread(xs_threadproc_create_stub, 0, taarg);
@@ -99,7 +100,8 @@ static int pthread_cancel(pthread_t th) {
     return 0;
 }
 
-static int pthread_join(pthread_t th, void **vptr) {
+static int pthread_join(pthread_t th, void **dummy) {
+    dummy;
     return WaitForSingleObject (th, INFINITE);
 }
 

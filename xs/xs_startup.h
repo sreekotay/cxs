@@ -62,7 +62,7 @@ static void __cdecl xs_atexit_handler(void) {
 #ifndef WIN32
 #include <execinfo.h>
 #endif
-static void xs_log_stack_trace() {
+static void xs_log_stack_trace(void) {
 #ifndef WIN32
     void *arr[256];
     size_t frames = backtrace(arr, sizeof(arr)), i;
@@ -115,6 +115,7 @@ void xs_startup(int flags, xs_signal_cb proc, void* data) {
 	WSADATA wsdata;
 	WSAStartup(MAKEWORD(2,2), &wsdata);
 #endif    
+    flags;
     gsig_cb = proc;
 	gsig_data = data;
     xs_logger_init();

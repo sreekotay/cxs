@@ -7,8 +7,8 @@
 // =================================================================================================================
 // very basic atomics
 // =================================================================================================================
-#define xs_atomic_spin(cond)                do{int i=0,cev;while(i++<10240&&(cev=(cond))){    sched_yield();}if(cev)while(cond){    usleep((++i)>>14);}}while(0)
-#define xs_atomic_spin_do(cond, act)        do{int i=0,cev;while(i++<10240&&(cev=(cond))){act;sched_yield();}if(cev)while(cond){act;usleep((++i)>>14);}}while(0)
+#define xs_atomic_spin(cond)                do{int i=0,cev=0;while(i++<10240&&(cev=(cond))){    sched_yield();}if(cev)while(cond){    usleep((++i)>>14);}}while(0)
+#define xs_atomic_spin_do(cond, act)        do{int i=0,cev=0;while(i++<10240&&(cev=(cond))){act;sched_yield();}if(cev)while(cond){act;usleep((++i)>>14);}}while(0)
 
 #ifdef WIN32
 #define xs_atomic                           volatile long

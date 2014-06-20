@@ -16,15 +16,15 @@ typedef struct SSL_st       SSL;
 typedef struct SSL_ctx_st   SSL_CTX;
 
 //init
-char            xs_SSL_ready            ();
-int             xs_SSL_initialize       ();
-void            xs_SSL_uninitialize     ();
+char            xs_SSL_ready            (void);
+int             xs_SSL_initialize       (void);
+void            xs_SSL_uninitialize     (void);
 const char*     xs_SSL_error            (SSL* ssl);
 
 //context
-SSL_CTX*        xs_SSL_newCTX_server    ();
+SSL_CTX*        xs_SSL_newCTX_server    (void);
 int             xs_SSL_set_certs        (SSL_CTX* s, const char* privateKeyPem, const char* certPem, const char* certChainPem); //needs to be set for server CTX to work
-SSL_CTX*        xs_SSL_newCTX_client    ();
+SSL_CTX*        xs_SSL_newCTX_client    (void);
 void            xs_SSL_freeCTX          (SSL_CTX* sslctx);
 
 //connection
@@ -236,7 +236,7 @@ pthread_mutex_t *xs_SSL_mutexes=0;
 void *xs_SSL_lib = 0;
 void *xs_crypto_lib = 0;
 
-char    xs_SSL_ready ()                                         {return xs_SSL_refcount!=0;}
+char    xs_SSL_ready (void)                                     {return xs_SSL_refcount!=0;}
 int     xs_SSL_read  (SSL *ssl, void *buff, int len)            {return SSL_read(ssl,buff,len);}
 int     xs_SSL_write (SSL *ssl, const void *buff, int len)      {return SSL_write(ssl,buff,len);}
 
@@ -251,6 +251,7 @@ char xs_SSL_protocol(SSL* ssl, char* data, int maxlen) {
     memcpy(data, s, sl);
     data[sl]=0;
     */
+    ssl; data; maxlen;
     return 1;
 }
 char xs_sslize_accept(SSL **ssl, SSL_CTX *s, int sock) {
@@ -269,7 +270,7 @@ char xs_sslize_accept(SSL **ssl, SSL_CTX *s, int sock) {
       //SSL_set_session_id_context((*ssl), "webxsctx", 5);
       return 1;
   }
-  return c;
+  return (char)c;
 }
 
 char xs_sslize_connect(SSL **ssl, SSL_CTX *s, int sock) {
@@ -329,9 +330,9 @@ SSL_CTX*  xs_SSL_groom_CTX(SSL_CTX *ssl_ctx) {
   */
   return ssl_ctx;
 }
-SSL_CTX*        xs_SSL_newCTX_server ()             {return xs_SSL_groom_CTX(SSL_CTX_new(SSLv23_server_method()));}
-SSL_CTX*        xs_SSL_newCTX_client ()             {return xs_SSL_groom_CTX(SSL_CTX_new(SSLv23_client_method()));}
-void            xs_SSL_freeCTX (SSL_CTX* sslctx)    {if (sslctx) SSL_CTX_free (sslctx);}
+SSL_CTX*        xs_SSL_newCTX_server (void)             {return xs_SSL_groom_CTX(SSL_CTX_new(SSLv23_server_method()));}
+SSL_CTX*        xs_SSL_newCTX_client (void)             {return xs_SSL_groom_CTX(SSL_CTX_new(SSLv23_client_method()));}
+void            xs_SSL_freeCTX (SSL_CTX* sslctx)        {if (sslctx) SSL_CTX_free (sslctx);}
 
 
 void xs_SSL_locking_callback(int mode, int mutex_num, const char *file, int line) {
@@ -357,7 +358,7 @@ int xs_SSL_set_certs(SSL_CTX* sslctx, const char* privateKeyPem, const char* cer
 
 
 // Dynamically load SSL library. Set up sslHolder_CTX.
-int xs_SSL_initialize() {//, const char *pem, int (*init_ssl)(void *ssl_context, void *user_data), void* user_data) {
+int xs_SSL_initialize(void) {//, const char *pem, int (*init_ssl)(void *ssl_context, void *user_data), void* user_data) {
   int i, size;
 
   //already initialized?
@@ -395,7 +396,7 @@ int xs_SSL_initialize() {//, const char *pem, int (*init_ssl)(void *ssl_context,
   return 0;
 }
 
-void xs_SSL_uninitialize() {
+void xs_SSL_uninitialize(void) {
   int i;
   if (xs_atomic_dec(xs_SSL_refcount)!=1) return;
   CRYPTO_set_locking_callback(NULL);

@@ -2,6 +2,10 @@
     #define FD_SETSIZE      1024
     #include <ws2tcpip.h>   //if you want IPv6 on Windows, this has to be first
     #define sleep(a)        Sleep((a)*1000)
+    #pragma warning (disable : 4127)    //conditional expression is constant
+    #pragma warning (disable : 4505)    //unreferenced local function has been removed
+    #pragma warning (disable : 4706)    //assignment within conditional expression
+    #pragma warning (disable : 4996)    //This function or variable may be unsafe. 
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +21,7 @@
 #include "xs/xs_printf.h"
 #include "xs/xs_posix_emu.h"
 
-int server_handler (struct xs_async_connect* xas, int message, xs_conn* conn);
+int server_handler (struct xs_async_connect* xas, int message, void* messageData, xs_conn* conn);
 int do_benchmark (int argc, char *argv[]);
 void load_redirfile();
 
@@ -27,9 +31,8 @@ void doit();
 // main
 // =================================================================================================================
 int main(int argc, char *argv[]) {
-    int err=0, accesslog=0, i, port = 8080, singlethreadaccept = 0;
+    int accesslog=0, i, port = 8080, singlethreadaccept = 0;
     xs_server_ctx *ctx;
-    xs_async_connect* xas;
     char sslkey[] = "default_webxs_ssl_key.pem";
 
     //init all
@@ -59,15 +62,15 @@ int main(int argc, char *argv[]) {
 	    }
     
         //start server and connections
-        ctx = xs_server_create(".", argv[0], server_handler);
-        //xs_server_auth_file(ctx, ".", "passwd"); // <--- replace with your htpasswd file
-        xas = xs_server_xas(ctx); 
+        ctx = xs_server_create();
+        xs_server_sethandler (ctx, NULL, server_handler, ".", argv[0]);
+        xs_server_auth_file  (ctx, ".", ".htpasswd"); // <--- replace with your htpasswd file
         if (accesslog==0) xs_logger_level(exs_Log_Error, exs_Log_Info);
 
         //main server loop
 	    xs_server_listen     (ctx, port, 0);
 	    xs_server_listen_ssl (ctx, 443,  0, sslkey, sslkey, sslkey);
-        if (singlethreadaccept) xs_async_lock(xas);
+        if (singlethreadaccept) xs_async_lock(xs_server_xas(ctx));
         //doit();
 
 	    while (xs_server_active(ctx)) {sleep(1);} //your app's event loop
@@ -85,16 +88,17 @@ int main(int argc, char *argv[]) {
 // =================================================================================================================
 // server code example
 // =================================================================================================================
-xs_atomic gcount=0, gocount=0, gredir=0;
+xs_atomic gcount=0, gocount=0, gredir=0, gscount=0, gswcount=0;
 xs_arr gurlarr={0};
-int server_handler (struct xs_async_connect* xas, int message, xs_conn* conn) {
+int server_handler (struct xs_async_connect* xas, int message, void* messageData, xs_conn* conn) {
     char buf[1024];
     const char wsmsg[] = "server ready";
-
     int n, rr=1, err=0, s;
     xs_httpreq* req;
+    messageData;
     switch (message) {
        case exs_Conn_Read:
+            if (0) return xs_simpleresponse(conn);
             while (err==0 && rr) {
                 n = xs_conn_httpread(conn, buf, sizeof(buf)-1, &rr);
                 s = xs_conn_state (conn);
@@ -278,7 +282,6 @@ int do_benchmark (int argc, char *argv[]) {
 
     while (gexit==0) {sleep(1);}
 
-
     //done
     if (u) xs_uri_destroy(u);
     for (i=0; i<xs_arr_count(xa); i++) {
@@ -289,7 +292,7 @@ int do_benchmark (int argc, char *argv[]) {
 }
 
 
-double mytime() {
+double mytime(void) {
 	struct timespec ts;
     int err;
     double t;
@@ -334,12 +337,12 @@ int perform_get(xs_async_connect* xas, bench_tl* btl, xs_conn* conn) {
 
     return err;
 }
-int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
+int benchmark_cb (struct xs_async_connect* xas, int message, void* messageData, xs_conn* conn) {
     char buf[1024];
-    const char wsmsg[] = "server ready";
     int n, rr=1, err=0, s;
     bench_tl* btl = (bench_tl*)xs_async_getuserdata (xas);
     bench* bn = btl ? btl->bn : 0;
+    messageData;
 
     if (bn==0) 
         err = exs_Conn_Close;
@@ -347,7 +350,7 @@ int benchmark_cb (struct xs_async_connect* xas, int message, xs_conn* conn) {
     switch (message) {
         case exs_Conn_Write:
         case exs_Conn_New:
-            if (bn->count==0) gtime = mytime();
+            if (gtime==0) gtime = mytime();
             xs_atomic_dec(bn->count);
             err = perform_get(xas, btl, conn); 
             if (err && err!=exs_Error_WriteBusy) {} 
@@ -404,7 +407,7 @@ xs_async_connect* launch_connects(bench* bn, int concurrent, int total) {
     int err=0, i;
     xs_async_connect* xas=xs_async_create (concurrent, benchmark_cb);
     xs_conn* conn=0;
-    bench_tl* btl = calloc(sizeof(bench_tl), 1);
+    bench_tl* btl = (bench_tl*)calloc(sizeof(bench_tl), 1);
     btl->bn = bn;
     btl->ltotal = total;//(bn->total + concurrent - 1) / concurrent;
     printf ("=============== total per concurrent %d\n", (int) btl->ltotal);
