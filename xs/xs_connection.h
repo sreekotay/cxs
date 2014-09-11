@@ -1076,13 +1076,13 @@ size_t xs_conn_httprequest (xs_conn* conn, const char* host, const char* method,
                         "%s %s HTTP/1.1\r\n"
                         "Connection: keep-alive\r\n"
                         "Server: %s\r\n"
-                        "Data: %s\r\n"
+                        "Date: %s\r\n"
                         "Host: %s \r\n" 
                     :
                         "%s %s HTTP/1.1\r\n"
                         "Connection: keep-alive\r\n"
                         "Server: %s\r\n"
-                        "Data: %s\r\n",
+                        "Date: %s\r\n",
                     method, path, xs_server_name(), 
                     xs_timestr_now(), host
                     );
