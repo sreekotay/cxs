@@ -35,18 +35,10 @@ State state = ConnectionState_Disconnected;
 
 void wait_for(State s, xs_conn* conn)
 {
-    #if 0
-    while (state != s)
-    {
-        mycb(0,  exs_Conn_Read, conn);
-        sleep(1);
-    }
-    #else
     pthread_mutex_lock(&mutex);
     while (state != s)
         pthread_cond_wait(&cond, &mutex);
     pthread_mutex_unlock(&mutex);
-    #endif
 }
 
 void set_state(State s)
@@ -57,45 +49,40 @@ void set_state(State s)
     pthread_cond_signal(&cond);
 }
 
-
 int port = 443;
 char* host = "echo.websocket.org";
-
 char* path = "/";
-//char* msg = "ZZZ012345678901234567890123456789ZZZ";
 
-int count = 0;
-
-int mycb(struct xs_async_connect* msg, int message, xs_conn* conn) 
+int mycb(struct xs_async_connect* msg, int message, void* messageData, xs_conn* conn) 
 {
-#define LOGCASE(C) case C: printf("%p: %s\n", pthread_self(), #C); break
+#define LOGCASE(C) case C: printf("%lu: %s\n", pthread_self(), #C); break
 
-    switch (message) 
+    switch (message)
     {
         case exs_Conn_New:
-            printf("%p -- exs_Conn_New\n", pthread_self());
-            //set_state(ConnectionState_Connected);
+            printf("%lu -- exs_Conn_New\n", pthread_self());
             break;
 
         case exs_Conn_Close:
-            printf("%p -- exs_Conn_Close\n", pthread_self());
+            printf("%lu -- exs_Conn_Close\n", pthread_self());
             set_state(ConnectionState_ShuttingDown);
             break;
 
         case exs_XAS_Destroy:
-            printf("%p -- exs_XAS_Destroy\n", pthread_self());
+            printf("%lu -- exs_XAS_Destroy\n", pthread_self());
             set_state(ConnectionState_Shutdown);
             break;
 
         LOGCASE(exs_XAS_Create);
         LOGCASE(exs_Conn_Read);
+//        LOGCASE(exs_Conn_Read);
         LOGCASE(exs_Conn_Error);
         LOGCASE(exs_Conn_Handled);
         LOGCASE(exs_Conn_Write);
         LOGCASE(exs_Conn_Idle);
 
         default:
-        printf("%p -- unhandled message: %d\n", pthread_self(), message);
+        //printf("%lu -- unhandled message: %d\n", pthread_self(), message);
         break;
     }
 
@@ -114,15 +101,15 @@ int mycb(struct xs_async_connect* msg, int message, xs_conn* conn)
         switch (s)
         {
             case exs_Conn_WSNew:
-                printf("%p -- exs_Conn_WSNew\n", pthread_self());
+                printf("%lu -- exs_Conn_WSNew\n", pthread_self());
                 break;
 
             case exs_Conn_WSFrameBegin:
-                printf("%p -- eexs_Conn_WSFrameBegin: %d\n", pthread_self(), n);
+                printf("%lu -- eexs_Conn_WSFrameBegin: %d\n", pthread_self(), n);
                 break;
 
             case exs_Conn_WSFrameRead:
-                printf("%p -- eexs_Conn_WSFrameRead\n: %d\n", pthread_self(), n);
+                printf("%lu -- eexs_Conn_WSFrameRead\n: %d\n", pthread_self(), n);
                 break;
 
             case exs_Conn_WSFrameEnd:
@@ -162,20 +149,21 @@ int main()
 {
     int err = 0;
     int i = 0;
+    char msg[256];
 
     xs_SSL_initialize();
-
-    printf("%p hi from main", pthread_self());
 
     bytes_read = 0;
     state = ConnectionState_Connecting;
 
     xs_conn* conn = NULL;
     xs_async_connect* xas = NULL;
+
     err = xs_conn_open(&conn, host, port, 1);
     if (err != 0)
     {
         printf("connect failed: %d\n", err);
+        return 0;
     }
     
     xas = xs_async_read(xas, conn, mycb);
@@ -185,31 +173,29 @@ int main()
     // wait for connection
     wait_for(ConnectionState_Connected, conn);
 
-    char* msg = "asdf123";
-
-    for (i = 0; i < 1; ++i)
+    for (i = 0; i < 10; ++i)
     {
-        printf("send:%s \n", msg);
+        memset(msg, 0, sizeof(msg));
+        sprintf(msg, "hello world: %ld", time(0));
+        printf("send: \"%s\"\n", msg);
         xs_conn_write_websocket(conn, exs_WS_PING, msg, strlen(msg), 0);
         sleep(1);
     }
 
-//    wait_for(ConnectionState_ShuttingDown, conn);
-#define HERE printf("%p: %d\n", pthread_self(), __LINE__)
+    wait_for(ConnectionState_ShuttingDown, conn);
 
-    HERE;
     xs_async_stop(xas);
-
-    // wait for callback to that indicates stop is complete
     wait_for(ConnectionState_Shutdown, conn);
 
-    HERE;
     xs_conn_destroy(conn);
+    xs_async_stop(xas);
 
-    HERE;
+    wait_for(ConnectionState_Shutdown, conn);
+    xs_conn_destroy(conn);
     xs_async_destroy(xas);
 
     xs_SSL_uninitialize();
+
     return 0;
 }
 

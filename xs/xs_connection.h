@@ -384,7 +384,7 @@ int xs_conn_opensock_ (xs_conn** connp, int sock, int use_ssl) {
     if (use_ssl && xs_SSL_ready() && (conn->sslctx=xs_SSL_newCTX_client())==0) err=-1000;
     if (err) {xs_conn_destroy(conn); return err;}
 
-    if (use_ssl && xs_sslize_connect(&conn->ssl, conn->sslctx, conn->sock)) err = -1001;
+    if (use_ssl && !xs_sslize_connect(&conn->ssl, conn->sslctx, conn->sock)) err = -1001;
     if (err) {xs_conn_destroy(conn); return err;}
 #else
     if (use_ssl) err = -1000;
@@ -1210,7 +1210,6 @@ size_t xs_conn_httpread(xs_conn *conn, void *buf, size_t len, int* reread) {
         } else if (req->upgrade==2) {
             if (req->opcode==exs_WS_PING)    xs_conn_write_websocket (conn, exs_WS_PONG, 0, 0, 0);
             if (req->opcode==exs_WS_PONG)    xs_conn_write_websocket (conn, exs_WS_PING, 0, 0, 0);
-
         } else if (req->contentlen==0 && req->chunked==0) {
             //if its not a reqest and not chunked, and no contentlen, read until socket closes, if there was no content-length
             if (req->method==0 && (h=xs_http_getheader(req, "Content-Length"))==0) {
