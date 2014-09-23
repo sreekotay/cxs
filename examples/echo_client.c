@@ -132,7 +132,7 @@ int mycb(struct xs_async_connect* msg, int message, void* messageData, xs_conn* 
                 break;
 
             case exs_Conn_Pending:
-                printf("%p -- eexs_Conn_Pending:%d\n", pthread_self(), n);
+                printf("%lu -- eexs_Conn_Pending:%d\n", pthread_self(), n);
                 break;
 
             default:
