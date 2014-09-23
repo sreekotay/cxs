@@ -73,8 +73,7 @@ int mycb(struct xs_async_connect* msg, int message, void* messageData, xs_conn* 
             set_state(ConnectionState_Shutdown);
             break;
 
-        LOGCASE(exs_XAS_Create);
-        LOGCASE(exs_Conn_Read);
+//        LOGCASE(exs_XAS_Create);
 //        LOGCASE(exs_Conn_Read);
         LOGCASE(exs_Conn_Error);
         LOGCASE(exs_Conn_Handled);
@@ -101,18 +100,19 @@ int mycb(struct xs_async_connect* msg, int message, void* messageData, xs_conn* 
         switch (s)
         {
             case exs_Conn_WSNew:
-                printf("%lu -- exs_Conn_WSNew\n", pthread_self());
+                // printf("%lu -- exs_Conn_WSNew\n", pthread_self());
                 break;
 
             case exs_Conn_WSFrameBegin:
-                printf("%lu -- eexs_Conn_WSFrameBegin: %d\n", pthread_self(), n);
+                // printf("%lu -- exs_Conn_WSFrameBegin: %d\n", pthread_self(), n);
                 break;
 
             case exs_Conn_WSFrameRead:
-                printf("%lu -- eexs_Conn_WSFrameRead\n: %d\n", pthread_self(), n);
+                // printf("%lu -- exs_Conn_WSFrameRead\n: %d\n", pthread_self(), n);
                 break;
 
             case exs_Conn_WSFrameEnd:
+                // printf("exs_Conn_WSFrameEnd: %d\n", bytes_read);
                 // This seems to be the correct way to figure out when the websocket is
                 // connected.
                 pthread_mutex_lock(&mutex);
@@ -122,17 +122,15 @@ int mycb(struct xs_async_connect* msg, int message, void* messageData, xs_conn* 
                 }
                 pthread_mutex_unlock(&mutex);
 
-                printf("exs_Conn_WSFrameEnd: %d\n", bytes_read);
                 if (bytes_read > 0 && state == ConnectionState_Connected) {
                     //printf("opcode:%d\n", xs_http_getint(xs_conn_getreq(conn), exs_Req_Opcode));
                     printf("recv: \"%.*s\"\n", bytes_read, read_buffer);
-//                    set_state(ConnectionState_ShuttingDown); 
                     bytes_read = 0;
                 }
                 break;
 
             case exs_Conn_Pending:
-                printf("%lu -- eexs_Conn_Pending:%d\n", pthread_self(), n);
+                // printf("%lu -- eexs_Conn_Pending:%d\n", pthread_self(), n);
                 break;
 
             default:
